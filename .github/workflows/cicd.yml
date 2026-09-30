@@ -1,0 +1,21 @@
+name: BFFs lib CICD
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  CICD:
+    # v3.2.0 is the release that ships bffs-lib-cicd.yml (the CICD PR is a `feat:`
+    # on top of v3.1.3). This caller cannot run until that release exists.
+    uses: mairie360/CICD/.github/workflows/bffs-lib-cicd.yml@v3.2.0
+    with:
+      cicd_version: v3.2.0
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      N8N_WEBHOOK_SECRET: ${{ secrets.N8N_WEBHOOK_SECRET }}
