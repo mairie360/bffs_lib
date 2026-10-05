@@ -31,6 +31,22 @@ await api.getProjects({ headers: { Authorization: authorization(req) } });
 const userId = unverifiedSubject(authorization(req));
 ```
 
+## Upstream configuration (MAIR-431)
+
+Every upstream is configured by `<SERVICE>_URL` (scheme optional) and optionally `<SERVICE>_PORT`, read on
+every call. There is no `localhost` default.
+
+```ts
+// src/index.ts, first line, before any import that could read the environment
+import 'dotenv/config';
+import { assertConfigured, baseUrl } from '@mairie360/bffs-lib';
+
+assertConfigured(['CORE_API', 'USER_BFF']); // throws at startup, naming every missing/invalid URL
+
+// per call: 503 'The CORE_API service is not configured.' when missing or invalid
+await coreApi.getMe({ baseURL: baseUrl('CORE_API') });
+```
+
 ## Usage
 
 ```ts
@@ -62,6 +78,7 @@ const { from, to } = parisDateWindow(30);
 | `parisDate`, `addDays`, `parisDateWindow` | `Europe/Paris` calendar helpers |
 | `bearerToken(req)`, `authorization(req)`, `requireBearer` | Bearer token of the request; normalised header or 401; middleware form |
 | `unverifiedSubject(token)` | numeric `sub` read without verifying the signature (never for access decisions) |
+| `baseUrl(service)`, `assertConfigured(services)` | `<SERVICE>_URL`/`_PORT` read per call, 503 when missing or invalid; startup check |
 | `noStore`, `parseTrustProxy(value)` | `Cache-Control: no-store` middleware; `TRUST_PROXY` -> Express `trust proxy` |
 
 ## Development
