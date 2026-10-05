@@ -13,7 +13,7 @@ jobs:
   CICD:
     # v3.2.0 is the release that ships bffs-lib-cicd.yml (the CICD PR is a `feat:`
     # on top of v3.1.3). This caller cannot run until that release exists.
-    uses: mairie360/CICD/.github/workflows/bffs-lib-cicd.yml@v3.2.0
+    uses: mairie360/CICD/.github/workflows/bffs-lib-cicd.yml@v4.0.3
     with:
       cicd_version: v3.2.0
     secrets:
