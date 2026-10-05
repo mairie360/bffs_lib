@@ -5,10 +5,13 @@ Guidance for Claude Code in this repository. Read `../CLAUDE.md` and `../../CLAU
 ## What this repo is
 
 `@mairie360/bffs-lib`: a small TypeScript library (CommonJS, built with `tsc` into `dist/`) shared by the
-seven BFFs. It is **not** a service. Peer dependencies: `express` 5 and `zod` 4.
+seven BFFs. It is **not** a service. Peer dependencies: `express` 5 and `zod` 4; runtime dependencies:
+`helmet`, `express-rate-limit`. No `axios` dependency: upstream errors are recognised by shape.
 
-Scope of MAIR-234: one error envelope `{ error: { code, message, details } }`, Express final handlers that
-keep the status, upstream error mapping (undeclared 4xx -> 502), `Europe/Paris` date helpers.
+Scope: MAIR-234 brought one error envelope `{ error: { code, message, details } }`, Express final handlers that
+keep the status, upstream error mapping (undeclared 4xx -> 502), `Europe/Paris` date helpers. MAIR-429/430/431 (02/10 audit) added everything the BFFs used to copy: Bearer
+handling, upstream URL/options/error mapping/retry, request validation, `check_apis`, security headers and
+rate limiting. When a BFF needs a variant, extend the lib instead of copying code back into the BFF.
 
 ## Commands
 
@@ -25,10 +28,13 @@ npm test           # jest, coverage thresholds 90%
 - `src/schema.ts`: zod envelope schemas (used by BFF contracts)
 - `src/errors.ts`: `HttpError`
 - `src/handlers.ts`: `notFoundHandler`, `errorHandler`
-- `src/upstream.ts`: `mapUpstreamError`
+- `src/upstream.ts`: `mapUpstreamError`, `upstreamError`, `callUpstream`, `withRetry`, `asCaller`, `withoutSession` (MAIR-430)
 - `src/dates.ts`: Paris date helpers
 - `src/auth.ts`: Bearer extraction (`authorization`, `requireBearer`), unverified `sub`, `noStore`, `parseTrustProxy` (MAIR-429)
 - `src/config.ts`: `baseUrl`, `assertConfigured` (MAIR-431)
+- `src/validation.ts`: `validationError`, `parseRequest` (MAIR-430)
+- `src/check-apis.ts`: `checkApis`, `checkApisResponseSchema` (MAIR-430)
+- `src/security.ts`: `securityHeaders`, `apiOnlyHeaders`, `createRateLimiter`, `sessionKey` (MAIR-430)
 - `src/index.ts`: the public API; anything not exported here is private
 
 ## Rules
@@ -38,4 +44,5 @@ npm test           # jest, coverage thresholds 90%
 - The only accepted credential is `Authorization: Bearer <token>`; do not add cookie or custom-header fallbacks.
 - Upstream URLs are `<SERVICE>_URL` (+ `_PORT`), read per call; never a `localhost` default, never read at import time.
 - A change to the envelope is a breaking change for the fronts: flag it with `!` in the commit.
-- English everywhere (see `../../CLAUDE.md`). CI/CD (workflows, release config, renovate) is not set up yet.
+- English everywhere (see `../../CLAUDE.md`). CI/CD: `.github/workflows/cicd.yml` calls `mairie360/CICD` `bffs-lib-cicd.yml`; semantic-release publishes to GitHub Packages.
+- Lockfile: CI runs npm 11, so regenerate it with `npx -y npm@11 install` and check with `npx -y npm@11 ci`.
