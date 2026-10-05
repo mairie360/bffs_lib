@@ -13,3 +13,4 @@ export {
   noStore,
   parseTrustProxy,
 } from './auth';
+export { baseUrl, assertConfigured } from './config';

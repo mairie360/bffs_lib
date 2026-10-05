@@ -28,6 +28,7 @@ npm test           # jest, coverage thresholds 90%
 - `src/upstream.ts`: `mapUpstreamError`
 - `src/dates.ts`: Paris date helpers
 - `src/auth.ts`: Bearer extraction (`authorization`, `requireBearer`), unverified `sub`, `noStore`, `parseTrustProxy` (MAIR-429)
+- `src/config.ts`: `baseUrl`, `assertConfigured` (MAIR-431)
 - `src/index.ts`: the public API; anything not exported here is private
 
 ## Rules
@@ -35,5 +36,6 @@ npm test           # jest, coverage thresholds 90%
 - Never forward upstream messages or bodies to clients, and never leak the message of an unexpected error.
 - A BFF must not answer a status its contract does not declare.
 - The only accepted credential is `Authorization: Bearer <token>`; do not add cookie or custom-header fallbacks.
+- Upstream URLs are `<SERVICE>_URL` (+ `_PORT`), read per call; never a `localhost` default, never read at import time.
 - A change to the envelope is a breaking change for the fronts: flag it with `!` in the commit.
 - English everywhere (see `../../CLAUDE.md`). CI/CD (workflows, release config, renovate) is not set up yet.
