@@ -27,11 +27,13 @@ npm test           # jest, coverage thresholds 90%
 - `src/handlers.ts`: `notFoundHandler`, `errorHandler`
 - `src/upstream.ts`: `mapUpstreamError`
 - `src/dates.ts`: Paris date helpers
+- `src/auth.ts`: Bearer extraction (`authorization`, `requireBearer`), unverified `sub`, `noStore`, `parseTrustProxy` (MAIR-429)
 - `src/index.ts`: the public API; anything not exported here is private
 
 ## Rules
 
 - Never forward upstream messages or bodies to clients, and never leak the message of an unexpected error.
 - A BFF must not answer a status its contract does not declare.
+- The only accepted credential is `Authorization: Bearer <token>`; do not add cookie or custom-header fallbacks.
 - A change to the envelope is a breaking change for the fronts: flag it with `!` in the commit.
 - English everywhere (see `../../CLAUDE.md`). CI/CD (workflows, release config, renovate) is not set up yet.
