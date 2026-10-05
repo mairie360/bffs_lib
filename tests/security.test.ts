@@ -84,6 +84,22 @@ describe('createRateLimiter', () => {
     expect((await request(app).post('/login').send({ email: 'b@x.fr' })).status).toBe(401);
   });
 
+  it('keys on keyOf alone across IPs with perIp: false', async () => {
+    const app = express();
+    app.set('trust proxy', true);
+    app.use(express.json());
+    app.post('/login', createRateLimiter({ limit: 1, perIp: false, keyOf: (req) => req.body?.email ?? '' }), (_req, res) => {
+      res.status(401).json({});
+    });
+    await request(app).post('/login').set('X-Forwarded-For', '203.0.113.1').send({ email: 'a@x.fr' });
+    expect((await request(app).post('/login').set('X-Forwarded-For', '198.51.100.7').send({ email: 'A@x.fr' })).status).toBe(429);
+    expect((await request(app).post('/login').set('X-Forwarded-For', '198.51.100.7').send({ email: 'b@x.fr' })).status).toBe(401);
+  });
+
+  it('refuses perIp: false without keyOf', () => {
+    expect(() => createRateLimiter({ perIp: false })).toThrow('perIp: false needs keyOf');
+  });
+
   it('reads its settings from the environment with a prefix', async () => {
     process.env.AUTH_RATE_LIMIT_MAX = '1';
     process.env.AUTH_RATE_LIMIT_WINDOW_MS = 'nonsense';

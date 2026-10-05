@@ -78,6 +78,8 @@ router.use(createRateLimiter({ limit: 30, windowMs: 60_000, failedOnly: false, k
 ```
 
 Never key a rate limit on a `sub` decoded without verification: use `sessionKey` (hash of the token).
+For a limit that must hold whatever the caller's IP (failed sign-ins per account, per refresh token), pass
+`perIp: false` with `keyOf`.
 
 ## Usage
 

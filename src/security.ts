@@ -58,6 +58,11 @@ export interface RateLimiterOptions {
   succeeded?: (req: Request, res: Response) => boolean;
   /** Extra key part (account e-mail, `sessionKey`...) appended to the client IP. */
   keyOf?: (req: Request) => string;
+  /**
+   * Put the client IP in the key. Default true. Set false with `keyOf` for a limit that must hold across
+   * IPs, e.g. failed sign-ins per account: an attacker rotating addresses must not get a fresh counter.
+   */
+  perIp?: boolean;
   /** Disabled when false. Default: `<prefix>_ENABLED` is not `false`. */
   enabled?: boolean;
   /** Message of the 429. Default `Too many requests`. */
@@ -72,7 +77,7 @@ function positiveInteger(value: string | undefined, fallback: number): number {
 /**
  * Rate limiter answering 429 in the shared error envelope, with `RateLimit` and `Retry-After` headers.
  * The key is the client IP (`req.ip`: set `trust proxy` with `parseTrustProxy` behind the ingress), plus
- * `keyOf(req)` when given. Counters live in memory, per replica.
+ * `keyOf(req)` when given, or `keyOf(req)` alone with `perIp: false`. Counters live in memory, per replica.
  *
  * `router.post('/login', createRateLimiter({ envPrefix: 'AUTH_RATE_LIMIT', keyOf: (req) => req.body?.email ?? '' }), handler)`
  */
@@ -80,6 +85,8 @@ export function createRateLimiter(options: RateLimiterOptions = {}): RequestHand
   const prefix = options.envPrefix ?? 'RATE_LIMIT';
   const enabled = options.enabled ?? process.env[`${prefix}_ENABLED`]?.trim().toLowerCase() !== 'false';
   const { keyOf, succeeded } = options;
+  const perIp = options.perIp ?? true;
+  if (!perIp && !keyOf) throw new Error('createRateLimiter: perIp: false needs keyOf, or every caller would share one counter');
 
   return rateLimit({
     windowMs: options.windowMs ?? positiveInteger(process.env[`${prefix}_WINDOW_MS`], 15 * 60 * 1000),
@@ -90,8 +97,10 @@ export function createRateLimiter(options: RateLimiterOptions = {}): RequestHand
     ...(succeeded ? { requestWasSuccessful: succeeded } : {}),
     skip: () => !enabled,
     keyGenerator: (req) => {
+      const key = keyOf ? keyOf(req).trim().toLowerCase() : '';
+      if (!perIp) return `key|${key}`;
       const ip = ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? 'unknown');
-      return keyOf ? `${ip}|${keyOf(req).trim().toLowerCase()}` : ip;
+      return keyOf ? `${ip}|${key}` : ip;
     },
     message: buildErrorResponse('TOO_MANY_REQUESTS', options.message ?? defaultMessage('TOO_MANY_REQUESTS')),
   });
