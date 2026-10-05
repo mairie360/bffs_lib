@@ -1,6 +1,7 @@
 # bffs_lib
 
-`@mairie360/bffs-lib`: shared building blocks of the Mairie 360 BFFs (MAIR-234).
+`@mairie360/bffs-lib`: shared building blocks of the Mairie 360 BFFs (MAIR-234, MAIR-429, MAIR-430, MAIR-431).
+A BFF must use these instead of keeping its own copy.
 
 ## Error envelope
 
@@ -47,6 +48,37 @@ assertConfigured(['CORE_API', 'USER_BFF']); // throws at startup, naming every m
 await coreApi.getMe({ baseURL: baseUrl('CORE_API') });
 ```
 
+## Upstream calls, validation, check_apis, security (MAIR-430)
+
+```ts
+import {
+  asCaller, withoutSession, callUpstream, parseRequest, checkApis, checkApisResponseSchema,
+  securityHeaders, apiOnlyHeaders, createRateLimiter, sessionKey, parseTrustProxy,
+} from '@mairie360/bffs-lib';
+
+// app.ts
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
+app.use(securityHeaders);
+app.use(apiOnlyHeaders()); // default-src 'none' everywhere but /docs
+
+// route: 401 without session, 503 when CORE_API_URL is missing, declared 4xx relayed, the rest -> 502
+const body = parseRequest(UpdateSchema, req.body, 'body'); // 400 'Validation failed' with body.<field> details
+const { data } = await callUpstream('CORE_API', () => coreApi.getMe(asCaller('CORE_API', req)), { declared: [404] });
+
+// idempotent calls only: retry once on no answer / 502 / 503 / 504
+await callUpstream('PROJECT_API', () => projectApi.getProjects(asCaller('PROJECT_API', req)), { retry: true });
+
+// /check_apis
+registry.register('CheckApisResponse', checkApisResponseSchema(['core_api']));
+router.get('/', checkApis({ core_api: () => coreApi.health(withoutSession('CORE_API', 5_000)) }));
+
+// rate limits (in memory, per replica)
+router.post('/login', createRateLimiter({ envPrefix: 'AUTH_RATE_LIMIT', keyOf: (req) => req.body?.email ?? '' }), login);
+router.use(createRateLimiter({ limit: 30, windowMs: 60_000, failedOnly: false, keyOf: sessionKey }));
+```
+
+Never key a rate limit on a `sub` decoded without verification: use `sessionKey` (hash of the token).
+
 ## Usage
 
 ```ts
@@ -80,6 +112,13 @@ const { from, to } = parisDateWindow(30);
 | `unverifiedSubject(token)` | numeric `sub` read without verifying the signature (never for access decisions) |
 | `baseUrl(service)`, `assertConfigured(services)` | `<SERVICE>_URL`/`_PORT` read per call, 503 when missing or invalid; startup check |
 | `noStore`, `parseTrustProxy(value)` | `Cache-Control: no-store` middleware; `TRUST_PROXY` -> Express `trust proxy` |
+| `asCaller(service, req)`, `withoutSession(service)` | axios-compatible options `{ baseURL, timeout, headers }` of an upstream call |
+| `upstreamError(service, error, declared)`, `callUpstream(service, call, options)` | one mapping of upstream failures: no answer / invalid answer / undeclared status -> 502 |
+| `withRetry(call, options)` | retry on no answer, 502, 503, 504; idempotent calls only |
+| `validationError(location, issues)`, `parseRequest(schema, value, location)` | 400 `Validation failed` with `<location>.<path>` details |
+| `checkApis(probes)`, `checkApisResponseSchema(names)` | `/check_apis` handler (200 / 502) and its contract schema |
+| `securityHeaders`, `apiOnlyHeaders(docsPath)` | helmet setup shared by every BFF; strict headers outside `/docs` |
+| `createRateLimiter(options)`, `sessionKey(req)` | express-rate-limit with the envelope and `<prefix>_*` env; unforgeable per-session key |
 
 ## Development
 
