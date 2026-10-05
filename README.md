@@ -13,6 +13,24 @@ Every BFF answers errors with one shape, declared in its OpenAPI contract:
 `details` is always present (empty array when there is nothing to add). `code` is one of `ERROR_CODES`
 and is derived from the HTTP status.
 
+## Session (MAIR-429)
+
+A BFF accepts one credential only: `Authorization: Bearer <token>` (the fronts' proxy turns the
+`accessToken` cookie into it). Cookies, `x-session-token` and other schemes are ignored.
+
+```ts
+import { authorization, requireBearer, noStore, parseTrustProxy, unverifiedSubject } from '@mairie360/bffs-lib';
+
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
+app.use('/projects', noStore, requireBearer, projectsRouter); // 401 before any upstream call
+
+// forward the caller's session, normalised to `Bearer <token>` (401 when missing)
+await api.getProjects({ headers: { Authorization: authorization(req) } });
+
+// unverified `sub`: only to shape a request sent upstream with the same token, never to grant access
+const userId = unverifiedSubject(authorization(req));
+```
+
 ## Usage
 
 ```ts
@@ -42,6 +60,9 @@ const { from, to } = parisDateWindow(30);
 | `notFoundHandler`, `errorHandler(options?)` | last two middlewares; the status is preserved, unknown errors become a generic 500 |
 | `mapUpstreamError(error, declaredStatuses)` | declared upstream 4xx relayed, undeclared 4xx / 5xx / network errors -> 502 |
 | `parisDate`, `addDays`, `parisDateWindow` | `Europe/Paris` calendar helpers |
+| `bearerToken(req)`, `authorization(req)`, `requireBearer` | Bearer token of the request; normalised header or 401; middleware form |
+| `unverifiedSubject(token)` | numeric `sub` read without verifying the signature (never for access decisions) |
+| `noStore`, `parseTrustProxy(value)` | `Cache-Control: no-store` middleware; `TRUST_PROXY` -> Express `trust proxy` |
 
 ## Development
 
