@@ -38,7 +38,7 @@ describe('checkApis', () => {
     const app = express();
     app.get('/check_apis', checkApis({ core_api: () => Promise.reject(new Error('down')), other: () => Promise.reject('nope') }));
     await request(app).get('/check_apis');
-    expect(warn).toHaveBeenCalledWith('[check_apis] core_api unreachable: down');
+    expect(warn).toHaveBeenCalledWith('[check_apis] core_api unreachable: Error: down');
     expect(warn).toHaveBeenCalledWith('[check_apis] other unreachable: nope');
     warn.mockRestore();
   });
