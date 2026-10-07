@@ -56,7 +56,10 @@ describe('createRateLimiter', () => {
     await request(app).post('/login');
     const res = await request(app).post('/login');
     expect(res.status).toBe(429);
-    expect(res.headers['retry-after']).toBeDefined();
+    // A usable wait: whole seconds, at least 1 (a 0 would tell the client to retry at once, MAIR-474).
+    expect(res.headers['retry-after']).toMatch(/^\d+$/);
+    expect(Number(res.headers['retry-after'])).toBeGreaterThanOrEqual(1);
+    expect(Number(res.headers['retry-after'])).toBeLessThanOrEqual(60);
     expect(res.headers['ratelimit-policy']).toBeDefined();
     expect(ErrorResponseSchema.parse(res.body).error).toEqual({ code: 'TOO_MANY_REQUESTS', message: 'Too many requests', details: [] });
   });
