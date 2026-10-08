@@ -13,6 +13,15 @@ export {
   noStore,
   parseTrustProxy,
 } from './auth';
+export {
+  INVALID_TOKEN_MESSAGE,
+  SESSION_NOT_CONFIGURED_MESSAGE,
+  verifySessionToken,
+  requireSession,
+  verifiedSession,
+  sessionUserId,
+  type VerifiedSession,
+} from './session';
 export { baseUrl, assertConfigured } from './config';
 export {
   UPSTREAM_TIMEOUT_MS,
