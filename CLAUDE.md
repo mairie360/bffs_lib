@@ -42,10 +42,12 @@ npm test           # jest, coverage thresholds 90%
 - `src/security.ts`: `securityHeaders`, `apiOnlyHeaders`, `createRateLimiter`, `sessionKey` (MAIR-430)
 - `src/telemetry.ts`: `startTelemetry` (MAIR-504): HTTP + Express instrumentations, OTLP export of traces and metrics, off
   without `OTEL_EXPORTER_OTLP_ENDPOINT`; `RedactingSpanExporter` / `redactSpan` keep only `TELEMETRY_ATTRIBUTES`
+- `src/redis.ts`: `createTtlRedis` (MAIR-499): the BFFs' Redis client, every write with a TTL (`setWithTtl`, 1 s to `maxTtlSeconds`, no plain `set`), prefixed keys, `GET` / `SET … EX [NX]` / `DEL` / `EXPIRE` only; no Redis dependency, it runs on an executor built with `fromIoredis` / `fromNodeRedis` from the BFF's own driver
 - `src/index.ts`: the public API; anything not exported here is private
 
 ## Rules
 
+- Redis goes through `createTtlRedis` only: a key without TTL would keep its personal data forever (MAIR-499, Semgrep `gdpr-ts-redis-write-without-ttl` in CICD).
 - Never forward upstream messages or bodies to clients, and never leak the message of an unexpected error.
 - Never log an error as is (MAIR-290): an `HttpError` from `upstreamError` / `callUpstream` keeps the axios error as `cause`, whose `config.headers` hold the caller's Bearer token and `config.data` / `response.data` the request and response bodies. Log `describeError(error)` (name, status, code, method and path of the call, masked message, cause chain, stack frames); `errorHandler` and `checkApis` do by default, a custom `onError` still receives the original error. The CICD's log marker test (`gdpr_marker` job) searches every container's logs for a marker user's values.
 - Telemetry must never export personal data (MAIR-290, MAIR-501): a new span or metric attribute goes through
