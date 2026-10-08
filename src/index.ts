@@ -2,6 +2,7 @@ export { ERROR_CODES, codeForStatus, defaultMessage, type ErrorCode } from './er
 export { ErrorDetailSchema, ErrorResponseSchema, type ErrorDetail, type ErrorResponse } from './schema';
 export { HttpError, buildErrorResponse, httpErrorBody, type HttpErrorOptions } from './errors';
 export { notFoundHandler, errorHandler, type ErrorHandlerOptions } from './handlers';
+export { describeError, maskValues, type DescribeErrorOptions } from './describe-error';
 export { mapUpstreamError, upstreamStatus } from './upstream';
 export { PARIS_TIME_ZONE, parisDate, addDays, parisDateWindow } from './dates';
 export {

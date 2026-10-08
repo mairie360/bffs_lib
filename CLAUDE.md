@@ -28,6 +28,7 @@ npm test           # jest, coverage thresholds 90%
 - `src/schema.ts`: zod envelope schemas (used by BFF contracts)
 - `src/errors.ts`: `HttpError`
 - `src/handlers.ts`: `notFoundHandler`, `errorHandler`
+- `src/describe-error.ts`: `describeError`, `maskValues` (MAIR-290)
 - `src/upstream.ts`: `mapUpstreamError`, `upstreamError`, `callUpstream`, `withRetry`, `asCaller`, `withoutSession` (MAIR-430)
 - `src/dates.ts`: Paris date helpers
 - `src/auth.ts`: Bearer extraction (`authorization`, `requireBearer`), unverified `sub`, `noStore`, `parseTrustProxy` (MAIR-429)
@@ -44,6 +45,7 @@ npm test           # jest, coverage thresholds 90%
 ## Rules
 
 - Never forward upstream messages or bodies to clients, and never leak the message of an unexpected error.
+- Never log an error as is (MAIR-290): an `HttpError` from `upstreamError` / `callUpstream` keeps the axios error as `cause`, whose `config.headers` hold the caller's Bearer token and `config.data` / `response.data` the request and response bodies. Log `describeError(error)` (name, status, code, method and path of the call, masked message, cause chain, stack frames); `errorHandler` and `checkApis` do by default, a custom `onError` still receives the original error. The CICD's log marker test (`gdpr_marker` job) searches every container's logs for a marker user's values.
 - A BFF must not answer a status its contract does not declare.
 - The only accepted credential is `Authorization: Bearer <token>`; do not add cookie or custom-header fallbacks.
 - Upstream URLs are `<SERVICE>_URL` (+ `_PORT`), read per call; never a `localhost` default, never read at import time.

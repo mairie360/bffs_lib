@@ -1,4 +1,5 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
+import { describeError } from './describe-error';
 import { codeForStatus, defaultMessage } from './error-codes';
 import { buildErrorResponse, httpErrorBody, HttpError } from './errors';
 
@@ -8,7 +9,11 @@ export const notFoundHandler: RequestHandler = (_req, res) => {
 };
 
 export interface ErrorHandlerOptions {
-  /** Called for every 5xx with the original error. Defaults to `console.error`. */
+  /**
+   * Called for every 5xx with the original error. Defaults to `console.error(describeError(error))`.
+   * Never log the error itself: its upstream `cause` holds the caller's token and the request and
+   * response bodies (MAIR-290); log `describeError(error)`.
+   */
   onError?: (error: unknown) => void;
 }
 
@@ -19,7 +24,7 @@ export interface ErrorHandlerOptions {
  * - anything else -> 500, without leaking the message
  */
 export function errorHandler(options: ErrorHandlerOptions = {}): ErrorRequestHandler {
-  const report = options.onError ?? ((error: unknown) => console.error(error));
+  const report = options.onError ?? ((error: unknown) => console.error(describeError(error)));
   return (error, _req, res, next) => {
     if (res.headersSent) return next(error);
     if (error instanceof HttpError) {
