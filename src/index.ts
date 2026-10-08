@@ -38,3 +38,15 @@ export {
 export { VALIDATION_FAILED_MESSAGE, validationError, parseRequest, type RequestLocation, type ValidationIssue } from './validation';
 export { ReachabilitySchema, checkApisResponseSchema, checkApis, type UpstreamProbes, type CheckApisOptions } from './check-apis';
 export { securityHeaders, apiOnlyHeaders, sessionKey, createRateLimiter, type RateLimiterOptions } from './security';
+export {
+  TELEMETRY_ATTRIBUTES,
+  UNTRACED_PATHS,
+  TELEMETRY_SHUTDOWN_TIMEOUT_MS,
+  RedactingSpanExporter,
+  redactSpan,
+  urlTemplate,
+  telemetryEnabled,
+  startTelemetry,
+  type Telemetry,
+  type TelemetryOptions,
+} from './telemetry';

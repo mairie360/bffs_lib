@@ -6,7 +6,7 @@ Guidance for Claude Code in this repository. Read `../CLAUDE.md` and `../../CLAU
 
 `@mairie360/bffs-lib`: a small TypeScript library (CommonJS, built with `tsc` into `dist/`) shared by the
 seven BFFs. It is **not** a service. Peer dependencies: `express` 5 and `zod` 4; runtime dependencies:
-`helmet`, `express-rate-limit`. No `axios` dependency: upstream errors are recognised by shape.
+`helmet`, `express-rate-limit` and the `@opentelemetry/*` packages of `src/telemetry.ts`. No `axios` dependency: upstream errors are recognised by shape.
 
 Scope: MAIR-234 brought one error envelope `{ error: { code, message, details } }`, Express final handlers that
 keep the status, upstream error mapping (undeclared 4xx -> 502), `Europe/Paris` date helpers. MAIR-429/430/431 (02/10 audit) added everything the BFFs used to copy: Bearer
@@ -40,12 +40,16 @@ npm test           # jest, coverage thresholds 90%
 - `src/validation.ts`: `validationError`, `parseRequest` (MAIR-430)
 - `src/check-apis.ts`: `checkApis`, `checkApisResponseSchema` (MAIR-430)
 - `src/security.ts`: `securityHeaders`, `apiOnlyHeaders`, `createRateLimiter`, `sessionKey` (MAIR-430)
+- `src/telemetry.ts`: `startTelemetry` (MAIR-504): HTTP + Express instrumentations, OTLP export of traces and metrics, off
+  without `OTEL_EXPORTER_OTLP_ENDPOINT`; `RedactingSpanExporter` / `redactSpan` keep only `TELEMETRY_ATTRIBUTES`
 - `src/index.ts`: the public API; anything not exported here is private
 
 ## Rules
 
 - Never forward upstream messages or bodies to clients, and never leak the message of an unexpected error.
 - Never log an error as is (MAIR-290): an `HttpError` from `upstreamError` / `callUpstream` keeps the axios error as `cause`, whose `config.headers` hold the caller's Bearer token and `config.data` / `response.data` the request and response bodies. Log `describeError(error)` (name, status, code, method and path of the call, masked message, cause chain, stack frames); `errorHandler` and `checkApis` do by default, a custom `onError` still receives the original error. The CICD's log marker test (`gdpr_marker` job) searches every container's logs for a marker user's values.
+- Telemetry must never export personal data (MAIR-290, MAIR-501): a new span or metric attribute goes through
+  `TELEMETRY_ATTRIBUTES` and only if it cannot hold a request value (URL, query, body, header, id, IP).
 - A BFF must not answer a status its contract does not declare.
 - The only accepted credential is `Authorization: Bearer <token>`; do not add cookie or custom-header fallbacks.
 - Upstream URLs are `<SERVICE>_URL` (+ `_PORT`), read per call; never a `localhost` default, never read at import time.
