@@ -60,3 +60,15 @@ export {
   type TtlRedis,
   type TtlRedisOptions,
 } from './redis';
+export {
+  DEFAULT_USAGE_PERIOD_MS,
+  DEFAULT_USAGE_THRESHOLD,
+  DEFAULT_USAGE_RETAINED_PERIODS,
+  USAGE_METRICS_PATH,
+  createUsageLedger,
+  usageMiddleware,
+  usageMetricsHandler,
+  type UsageEntry,
+  type UsageLedger,
+  type UsageLedgerOptions,
+} from './usage';

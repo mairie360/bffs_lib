@@ -43,6 +43,10 @@ npm test           # jest, coverage thresholds 90%
 - `src/telemetry.ts`: `startTelemetry` (MAIR-504): HTTP + Express instrumentations, OTLP export of traces and metrics, off
   without `OTEL_EXPORTER_OTLP_ENDPOINT`; `RedactingSpanExporter` / `redactSpan` keep only `TELEMETRY_ATTRIBUTES`
 - `src/redis.ts`: `createTtlRedis` (MAIR-499): the BFFs' Redis client, every write with a TTL (`setWithTtl`, 1 s to `maxTtlSeconds`, no plain `set`), prefixed keys, `GET` / `SET … EX [NX]` / `DEL` / `EXPIRE` only; no Redis dependency, it runs on an executor built with `fromIoredis` / `fromNodeRedis` from the BFF's own driver
+- `src/usage.ts`: `createUsageLedger`, `usageMiddleware`, `usageMetricsHandler` (MAIR-501): usage counts per service, route
+  template, method, status and period; distinct users from `sha256(period salt, user id)`, the salt drawn per period and dropped
+  with the hashes at its close; only closed periods and counts at or above the threshold (5) are served on `/internal/usage`
+  (Prometheus text) for the instance's collector; no id, hash or salt is ever exported
 - `src/index.ts`: the public API; anything not exported here is private
 
 ## Rules
