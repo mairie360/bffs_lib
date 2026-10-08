@@ -76,3 +76,13 @@ export {
   type LoggerOptions,
   type RequestLoggerOptions,
 } from './logger';
+export {
+  DEFAULT_MAX_TTL_SECONDS,
+  createTtlRedis,
+  fromIoredis,
+  fromNodeRedis,
+  type RedisCommandExecutor,
+  type SetWithTtlOptions,
+  type TtlRedis,
+  type TtlRedisOptions,
+} from './redis';
