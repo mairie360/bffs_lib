@@ -1,6 +1,6 @@
 # bffs_lib
 
-`@mairie360/bffs-lib`: shared building blocks of the Mairie 360 BFFs (MAIR-234, MAIR-429, MAIR-430, MAIR-431).
+`@mairie360/bffs-lib`: shared building blocks of the Mairie 360 BFFs (MAIR-234, MAIR-429, MAIR-430, MAIR-431, MAIR-504).
 A BFF must use these instead of keeping its own copy.
 
 ## Error envelope
@@ -81,6 +81,41 @@ Never key a rate limit on a `sub` decoded without verification: use `sessionKey`
 For a limit that must hold whatever the caller's IP (failed sign-ins per account, per refresh token), pass
 `perIp: false` with `keyOf`.
 
+## Telemetry (MAIR-504)
+
+OpenTelemetry traces and metrics, exported over OTLP (http/protobuf) to the collector of the instance. Off
+unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set (and `OTEL_SDK_DISABLED` is not `true`): tests and local runs
+export nothing.
+
+```ts
+// src/telemetry.ts
+import { startTelemetry } from '@mairie360/bffs-lib';
+import { version } from '../package.json';
+
+startTelemetry({ serviceName: 'bff-user', serviceVersion: version });
+
+// src/index.ts: before the app, so that Express is instrumented
+import 'dotenv/config';
+import './telemetry';
+import app from './app';
+```
+
+- Spans: incoming requests named after the matched route (`GET /user/:userId`), Express route handlers, and
+  outgoing calls, which carry the W3C `traceparent` to the upstream APIs. `/health` is not traced.
+- Metrics: `http.server.request.duration` (per method, route, status) and `http.client.request.duration`
+  (per upstream host).
+- No personal data (MAIR-290, MAIR-501): only `TELEMETRY_ATTRIBUTES` are exported. No URL, query string,
+  body, header, client IP or user agent; the path of an outgoing call becomes `url.template`
+  (`/api/v1/users/{id}/groups`), status messages are dropped and exceptions keep their type only.
+- On SIGTERM / SIGINT the pending telemetry is flushed (at most 5 s), then the signal is raised again.
+
+| Variable | Role |
+| --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | collector base URL, e.g. `http://otel-collector:4318`; unset = telemetry off |
+| `OTEL_SDK_DISABLED` | `true` turns telemetry off even with an endpoint |
+| `OTEL_SERVICE_NAME` | overrides `serviceName` |
+| `OTEL_RESOURCE_ATTRIBUTES` | extra resource attributes, e.g. `deployment.environment.name=prod` |
+
 ## Usage
 
 ```ts
@@ -121,6 +156,8 @@ const { from, to } = parisDateWindow(30);
 | `checkApis(probes)`, `checkApisResponseSchema(names)` | `/check_apis` handler (200 / 502) and its contract schema |
 | `securityHeaders`, `apiOnlyHeaders(docsPath)` | helmet setup shared by every BFF; strict headers outside `/docs` |
 | `createRateLimiter(options)`, `sessionKey(req)` | express-rate-limit with the envelope and `<prefix>_*` env; unforgeable per-session key |
+| `startTelemetry(options)`, `telemetryEnabled()` | OpenTelemetry for a BFF, off without `OTEL_EXPORTER_OTLP_ENDPOINT` |
+| `redactSpan`, `RedactingSpanExporter`, `urlTemplate`, `TELEMETRY_ATTRIBUTES` | attribute allowlist applied to every exported span |
 
 ## Development
 
