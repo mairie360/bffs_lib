@@ -1,6 +1,6 @@
 /**
  * Role names as Core spells them vary ("Admin", "admin", "ROLE_RESPONSABLE", "Maire"...). A BFF deciding on a role it
- * read from the token (`sessionRoles`) or from Core compares normalized names (MAIR-525).
+ * read from the token (`sessionRole`) or from Core compares normalized names (MAIR-525).
  */
 
 /** `role` without accents, case, spaces, `_` / `-` nor a `role` prefix: `ROLE_RESPONSABLE` -> `responsable`. */

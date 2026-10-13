@@ -32,24 +32,23 @@ await api.getProjects({ headers: { Authorization: authorization(req) } });
 const userId = unverifiedSubject(authorization(req));
 ```
 
-### Caller's roles (MAIR-529)
+### Caller's role (MAIR-529)
 
-Core signs every role of the user in the `roles` claim of the session JWT (login and refresh). Behind
-`requireSession`, read them from the verified token instead of calling BFF User `/me`:
+Core signs the user's role in the `role` claim of the session JWT (login and refresh). Behind
+`requireSession`, read it from the verified token instead of calling BFF User `/me`:
 
 ```ts
-import { requireSession, sessionRoles } from '@mairie360/bffs-lib';
+import { requireSession, sessionRole, hasRole } from '@mairie360/bffs-lib';
 
 app.get('/admin-link', requireSession, async (req, res) => {
-  // `undefined` for a token issued before the claim existed: read the roles from Core API
-  // GET /api/v1/user/me/ until it is refreshed.
-  const roles = sessionRoles(req) ?? (await readRolesFromCore(req));
-  res.json({ isAdmin: roles.includes('Admin') });
+  // `undefined` when the claim is missing or empty (a token issued before it, or a user with no role):
+  // read the role from Core API GET /api/v1/user/me/.
+  const role = sessionRole(req) ?? (await readRoleFromCore(req));
+  res.json({ isAdmin: role !== undefined && hasRole([role], 'admin') });
 });
 ```
 
-The legacy `role` claim (one role at most) is never read. A role granted or removed shows in the token at its
-next refresh only.
+A role granted or removed shows in the token at its next refresh only.
 
 ## Upstream configuration (MAIR-431)
 
@@ -103,14 +102,14 @@ For a limit that must hold whatever the caller's IP (failed sign-ins per account
 ## No calls between BFFs, parallel calls, cache (MAIR-525)
 
 A BFF calls the APIs, never another BFF, unless it reuses non-trivial business logic no API has (say why in
-the code and the PR). The caller's roles come from the verified token, not from BFF User `/me`:
+the code and the PR). The caller's role comes from the verified token, not from BFF User `/me`:
 
 ```ts
-import { requireSession, sessionRoles } from '@mairie360/bffs-lib';
+import { requireSession, sessionRole } from '@mairie360/bffs-lib';
 
-// `roles` claim signed by Core (MAIR-529); `undefined` for a token issued before it:
-// then read them from Core API GET /api/v1/user/me/ (an API, not BFF User).
-const roles = sessionRoles(req) ?? (await readRolesFromCore(req));
+// `role` claim signed by Core (MAIR-529); `undefined` when missing or empty:
+// then read it from Core API GET /api/v1/user/me/ (an API, not BFF User).
+const role = sessionRole(req) ?? (await readRoleFromCore(req));
 ```
 
 Independent calls start together; lists are read with a bound on the calls in flight:
