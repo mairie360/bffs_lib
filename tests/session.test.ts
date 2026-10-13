@@ -6,6 +6,7 @@ import {
   INVALID_TOKEN_MESSAGE,
   errorHandler,
   requireSession,
+  sessionRoles,
   sessionUserId,
   verifiedSession,
   verifySessionToken,
@@ -101,5 +102,43 @@ describe('requireSession', () => {
   it('fails closed when a route reads the caller without the middleware', async () => {
     const res = await request(app).get('/unguarded').set('Authorization', `Bearer ${fresh}`);
     expect(res.status).toBe(401);
+  });
+});
+
+describe('roles of the verified token (MAIR-529)', () => {
+  it('reads the `roles` claim, trimmed', () => {
+    const token = sign({ sub: '2', roles: [' admin ', 'Maire', ''], exp: NOW + 3600 });
+    expect(verifySessionToken(token, SECRET, NOW).roles).toEqual(['admin', 'Maire']);
+  });
+
+  it('keeps an empty `roles` claim: the caller holds no role', () => {
+    expect(verifySessionToken(sign({ sub: '2', roles: [], exp: NOW + 3600 }), SECRET, NOW).roles).toEqual([]);
+  });
+
+  it('has no roles without a `roles` claim, whatever the legacy `role` claim says', () => {
+    for (const payload of [{ role: 'admin' }, { role: '' }, { roles: 'admin' }, { roles: ['admin', 1] }]) {
+      expect(verifySessionToken(sign({ sub: '2', exp: NOW + 3600, ...payload }), SECRET, NOW).roles).toBeUndefined();
+    }
+  });
+
+  it('exposes them to the routes behind requireSession, and refuses a route without it', async () => {
+    process.env.JWT_SECRET = SECRET;
+    jest.useFakeTimers({ now: NOW * 1000 });
+    try {
+      const app = express();
+      app.get('/open', (req, res) => { res.json({ roles: sessionRoles(req) }); });
+      app.get('/roles', requireSession, (req, res) => { res.json({ roles: sessionRoles(req) ?? null }); });
+      app.use(errorHandler());
+      const withRoles = sign({ sub: '2', roles: ['admin'], exp: NOW + 3600 });
+      expect((await request(app).get('/roles').set('Authorization', `Bearer ${withRoles}`)).body).toEqual({ roles: ['admin'] });
+      expect((await request(app).get('/roles').set('Authorization', `Bearer ${genuine}`)).body).toEqual({ roles: null });
+      // Roles signed with another secret are never read: the token is refused before the route.
+      const forged = sign({ sub: '2', roles: ['admin'], exp: NOW + 3600 }, { secret: 'other' });
+      expect((await request(app).get('/roles').set('Authorization', `Bearer ${forged}`)).status).toBe(401);
+      expect((await request(app).get('/open').set('Authorization', `Bearer ${withRoles}`)).status).toBe(401);
+    } finally {
+      jest.useRealTimers();
+      delete process.env.JWT_SECRET;
+    }
   });
 });

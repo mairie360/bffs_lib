@@ -32,6 +32,25 @@ await api.getProjects({ headers: { Authorization: authorization(req) } });
 const userId = unverifiedSubject(authorization(req));
 ```
 
+### Caller's roles (MAIR-529)
+
+Core signs every role of the user in the `roles` claim of the session JWT (login and refresh). Behind
+`requireSession`, read them from the verified token instead of calling BFF User `/me`:
+
+```ts
+import { requireSession, sessionRoles } from '@mairie360/bffs-lib';
+
+app.get('/admin-link', requireSession, async (req, res) => {
+  // `undefined` for a token issued before the claim existed: read the roles from Core API
+  // GET /api/v1/user/me/ until it is refreshed.
+  const roles = sessionRoles(req) ?? (await readRolesFromCore(req));
+  res.json({ isAdmin: roles.includes('Admin') });
+});
+```
+
+The legacy `role` claim (one role at most) is never read. A role granted or removed shows in the token at its
+next refresh only.
+
 ## Upstream configuration (MAIR-431)
 
 Every upstream is configured by `<SERVICE>_URL` (scheme optional) and optionally `<SERVICE>_PORT`, read on
