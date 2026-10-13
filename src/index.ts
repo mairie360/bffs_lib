@@ -21,6 +21,7 @@ export {
   requireSession,
   verifiedSession,
   sessionUserId,
+  sessionRoles,
   type VerifiedSession,
 } from './session';
 export { baseUrl, assertConfigured } from './config';

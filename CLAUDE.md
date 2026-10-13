@@ -34,7 +34,7 @@ npm test           # jest, coverage thresholds 90%
 - `src/auth.ts`: Bearer extraction (`authorization`, `requireBearer`), unverified `sub`, `noStore`, `parseTrustProxy` (MAIR-429)
 - `src/session.ts`: session tokens verified by the BFF (MAIR-474): `verifySessionToken` (HS256 with `JWT_SECRET`, `exp`
   without leeway, positive integer `sub`), `requireSession` (401 before any upstream call, 503 without `JWT_SECRET`),
-  `sessionUserId` / `verifiedSession`. Use them for any access decision; `requireBearer` and `unverifiedSubject` only
+  `sessionUserId` / `verifiedSession`, `sessionRoles` (the `roles` claim Core signs, MAIR-529; `undefined` on older tokens). Use them for any access decision; `requireBearer` and `unverifiedSubject` only
   check the shape and stay for the transition. Revocation and archived accounts are still checked upstream.
 - `src/config.ts`: `baseUrl`, `assertConfigured` (MAIR-431)
 - `src/validation.ts`: `validationError`, `parseRequest` (MAIR-430)
