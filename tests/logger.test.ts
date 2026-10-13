@@ -97,6 +97,12 @@ describe('requestLogger', () => {
     });
     users.get('/:userId/fail', (_req, _res, next) => next(new Error('boom')));
     users.get(['/:userId/a', '/:userId/b'], (_req, _res, next) => next(new Error('boom')));
+    users.get('/:userId/files/*file', (_req, _res, next) => next(new Error('boom')));
+    // A rewritten URL: req.originalUrl keeps the requested one, shorter than the route that matches.
+    app.use((req, _res, next) => {
+      if (req.url === '/legacy') req.url = '/users/42/fail';
+      next();
+    });
     app.use('/users', users);
     const projects = express.Router({ mergeParams: true });
     projects.get('/:taskId', (_req, _res, next) => next(new Error('boom')));
@@ -142,6 +148,16 @@ describe('requestLogger', () => {
       ['/users/:userId/fail', 500],
       ['/users/:userId/b', 500],
       ['/projects/{id}/tasks/:taskId', 500],
+    ]);
+  });
+
+  it('writes the masked path when the route cannot be laid on the requested URL', async () => {
+    const { app, lines } = buildApp();
+    await request(app).get('/users/42/files/report.pdf');
+    await request(app).get('/legacy');
+    expect(lines.map((line) => [line.path, line.status])).toEqual([
+      ['/users/{id}/files/{id}', 500],
+      ['/legacy', 500],
     ]);
   });
 

@@ -139,7 +139,7 @@ function routeOf(req: Request): string {
   const route = candidates.find((path): path is string => typeof path === 'string' && matchesTail(path, requested));
   if (route === undefined) return urlTemplate(pathname);
   const mount = urlTemplate(`/${requested.slice(0, requested.length - segmentsOf(route).length).join('/')}`);
-  return `${mount === '/' ? '' : mount}${route}` || '/';
+  return `${mount === '/' ? '' : mount}${route}`;
 }
 
 export interface RequestLoggerOptions {
