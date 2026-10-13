@@ -5,11 +5,13 @@ import { InMemorySpanExporter, type ReadableSpan } from '@opentelemetry/sdk-trac
 import {
   RedactingSpanExporter,
   TELEMETRY_ATTRIBUTES,
+  diagLogger,
   redactSpan,
   startTelemetry,
   telemetryEnabled,
   urlTemplate,
 } from '../src';
+import { captureLogs } from './support/capture-logs';
 
 const ENV = { ...process.env };
 
@@ -134,7 +136,7 @@ describe('startTelemetry', () => {
 
   it('starts, flushes on SIGTERM then re-raises the signal', async () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://127.0.0.1:9';
-    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    captureLogs();
     const handlers = new Map<string, () => void>();
     jest.spyOn(process, 'once').mockImplementation(((signal: string, handler: () => void) => {
       handlers.set(signal, handler);
@@ -153,10 +155,31 @@ describe('startTelemetry', () => {
 
   it('leaves the signals alone with handleSignals: false', async () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://127.0.0.1:9';
-    jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    captureLogs();
     const once = jest.spyOn(process, 'once');
     const telemetry = startTelemetry({ serviceName: 'bff-test', handleSignals: false, untracedPaths: [] });
     expect(once).not.toHaveBeenCalled();
     await expect(telemetry?.shutdown()).resolves.toBeUndefined();
+  });
+});
+
+describe('diagLogger', () => {
+  it('writes the OpenTelemetry diagnostics as masked JSON lines, without their arguments', () => {
+    process.env.LOG_LEVEL = 'debug';
+    const logs = captureLogs();
+    const header = 'Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0MiJ9.c2ln';
+    diagLogger.error(`export failed for ${header}`, { headers: { authorization: header } });
+    diagLogger.warn('warn');
+    diagLogger.info('info');
+    diagLogger.debug('debug');
+    diagLogger.verbose('verbose');
+    jest.restoreAllMocks();
+    expect(logs.map((line) => [line.level, line.message, line.source])).toEqual([
+      ['ERROR', 'export failed for Bearer …', 'opentelemetry'],
+      ['WARN', 'warn', 'opentelemetry'],
+      ['INFO', 'info', 'opentelemetry'],
+      ['DEBUG', 'debug', 'opentelemetry'],
+      ['DEBUG', 'verbose', 'opentelemetry'],
+    ]);
   });
 });

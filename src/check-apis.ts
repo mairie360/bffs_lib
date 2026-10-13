@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
 import { z } from 'zod';
 import { describeError } from './describe-error';
+import { logger as defaultLogger, requestId, type Logger } from './logger';
 
 /** One probe per upstream, keyed by its name in the answer (`core_api`, `user_bff`...). */
 export type UpstreamProbes = Readonly<Record<string, () => Promise<unknown>>>;
@@ -19,8 +20,13 @@ export function checkApisResponseSchema<const K extends string>(names: readonly 
 }
 
 export interface CheckApisOptions {
-  /** Called for each unreachable upstream. Defaults to a `console.warn` with the name and `describeError(error)` (MAIR-290). */
+  /** Called for each unreachable upstream, instead of the default log line. Log `describeError(error)`, never the error (MAIR-290). */
   onUnreachable?: (name: string, error: unknown) => void;
+  /**
+   * Logger of the default report (MAIR-531): one `warn` line `upstream unreachable` with `request_id`,
+   * `upstream` (the probe's name) and `error` = `describeError(error, { stack: false })`. Default: the lib's `logger`.
+   */
+  logger?: Logger;
 }
 
 /**
@@ -29,10 +35,12 @@ export interface CheckApisOptions {
  * synchronously (e.g. `baseUrl` on a missing variable) counts as unreachable.
  */
 export function checkApis(probes: UpstreamProbes, options: CheckApisOptions = {}): RequestHandler {
-  const report =
-    options.onUnreachable ??
-    ((name: string, error: unknown) => console.warn(`[check_apis] ${name} unreachable: ${describeError(error, { stack: false }).replace(/\n/g, ' ')}`));
-  return async (_req, res) => {
+  const log = options.logger ?? defaultLogger;
+  return async (req, res) => {
+    const report =
+      options.onUnreachable ??
+      ((name: string, error: unknown) =>
+        log.warn('upstream unreachable', { request_id: requestId(req), upstream: name, error: describeError(error, { stack: false }) }));
     const entries = Object.entries(probes);
     const results = await Promise.allSettled(entries.map(async ([, probe]) => probe()));
     const services = entries.map(([name], index) => {

@@ -1,6 +1,7 @@
 import express from 'express';
 import request from 'supertest';
-import { ErrorResponseSchema, HttpError, errorHandler, mapUpstreamError, notFoundHandler } from '../src';
+import { ErrorResponseSchema, HttpError, createLogger, errorHandler, mapUpstreamError, notFoundHandler, requestLogger } from '../src';
+import { captureLogs } from './support/capture-logs';
 
 function buildApp(onError = jest.fn()) {
   const app = express();
@@ -87,15 +88,32 @@ describe('error handlers', () => {
     expect(res.status === undefined || res.status === 200).toBe(true);
   });
 
-  it('logs with console.error by default', async () => {
-    const spy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  it('writes one JSON error line by default, with the request id', async () => {
+    const logs = captureLogs();
     const app = express();
+    app.use(requestLogger());
     app.get('/boom', () => {
       throw new Error('x');
     });
     app.use(errorHandler());
-    await request(app).get('/boom');
-    expect(spy).toHaveBeenCalled();
-    spy.mockRestore();
+    const res = await request(app).get('/boom').set('X-Request-Id', 'req-12345678');
+    jest.restoreAllMocks();
+    expect(logs[0]).toEqual(
+      expect.objectContaining({ level: 'ERROR', target: 'bff', message: 'request failed', request_id: 'req-12345678', status: 500 }),
+    );
+    expect(logs[0].error).toMatch(/^Error: x\n/);
+    expect(logs[1]).toEqual(expect.objectContaining({ message: 'request completed', status: 500, path: '/boom' }));
+    expect(res.headers['x-request-id']).toBe('req-12345678');
+  });
+
+  it('writes to the logger it is given', async () => {
+    const logger = { ...createLogger(), error: jest.fn() };
+    const app = express();
+    app.get('/upstream', () => {
+      throw new HttpError(502);
+    });
+    app.use(errorHandler({ logger }));
+    await request(app).get('/upstream');
+    expect(logger.error).toHaveBeenCalledWith('request failed', expect.objectContaining({ status: 502, request_id: undefined }));
   });
 });
