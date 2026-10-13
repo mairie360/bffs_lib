@@ -1,7 +1,7 @@
 import { context, trace, TraceFlags } from '@opentelemetry/api';
 import express from 'express';
 import request from 'supertest';
-import { REQUEST_ID_HEADER, createLogger, logger, notFoundHandler, requestId, requestLogger } from '../src';
+import { REQUEST_ID_HEADER, createLogger, errorHandler, logger, notFoundHandler, requestId, requestLogger } from '../src';
 import { captureLogs } from './support/capture-logs';
 
 const ENV = { ...process.env };
@@ -95,7 +95,18 @@ describe('requestLogger', () => {
     users.get('/:userId', (req, res) => {
       res.json({ id: requestId(req) });
     });
+    users.get('/:userId/fail', (_req, _res, next) => next(new Error('boom')));
+    users.get(['/:userId/a', '/:userId/b'], (_req, _res, next) => next(new Error('boom')));
+    users.get('/:userId/files/*file', (_req, _res, next) => next(new Error('boom')));
+    // A rewritten URL: req.originalUrl keeps the requested one, shorter than the route that matches.
+    app.use((req, _res, next) => {
+      if (req.url === '/legacy') req.url = '/users/42/fail';
+      next();
+    });
     app.use('/users', users);
+    const projects = express.Router({ mergeParams: true });
+    projects.get('/:taskId', (_req, _res, next) => next(new Error('boom')));
+    app.use('/projects/:projectId/tasks', projects);
     app.get('/health', (_req, res) => res.send('OK'));
     app.get('/boom', (_req, res) => res.status(503).end());
     app.get('/', (_req, res) => res.send('root'));
@@ -104,6 +115,7 @@ describe('requestLogger', () => {
       setTimeout(() => res.end(), 200);
     });
     app.use(notFoundHandler);
+    app.use(errorHandler({ logger: createLogger({ write: () => undefined }) }));
     return { app, lines: log.lines };
   }
 
@@ -124,6 +136,29 @@ describe('requestLogger', () => {
     const { app, lines } = buildApp();
     await request(app).get('/swagger.json');
     expect(lines[0]).toEqual(expect.objectContaining({ path: '/swagger.json', status: 200 }));
+  });
+
+  // MAIR-531: Express resets req.baseUrl while an error leaves a mounted router, so the route lost its mount path.
+  it('writes the full route of a mounted route that failed, with no id of its mount path', async () => {
+    const { app, lines } = buildApp();
+    await request(app).get('/users/42/fail');
+    await request(app).get('/users/42/b');
+    await request(app).get('/projects/7/tasks/9');
+    expect(lines.map((line) => [line.path, line.status])).toEqual([
+      ['/users/:userId/fail', 500],
+      ['/users/:userId/b', 500],
+      ['/projects/{id}/tasks/:taskId', 500],
+    ]);
+  });
+
+  it('writes the masked path when the route cannot be laid on the requested URL', async () => {
+    const { app, lines } = buildApp();
+    await request(app).get('/users/42/files/report.pdf');
+    await request(app).get('/legacy');
+    expect(lines.map((line) => [line.path, line.status])).toEqual([
+      ['/users/{id}/files/{id}', 500],
+      ['/legacy', 500],
+    ]);
   });
 
   it('keeps a well-formed incoming request id and replaces any other', async () => {

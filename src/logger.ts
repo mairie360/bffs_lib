@@ -112,15 +112,34 @@ export function requestId(req: object): string | undefined {
   return REQUEST_IDS.get(req);
 }
 
+/** Non-empty segments of a path. */
+function segmentsOf(path: string): string[] {
+  return path.split('/').filter(Boolean);
+}
+
+/** Whether `route` (literal segments and `:params` only) matches the last segments of `requested`. */
+function matchesTail(route: string, requested: string[]): boolean {
+  if (/[*?{}()]/.test(route)) return false;
+  const parts = segmentsOf(route);
+  if (parts.length > requested.length) return false;
+  const tail = requested.slice(requested.length - parts.length);
+  return parts.every((part, i) => part.startsWith(':') || part.toLowerCase() === tail[i].toLowerCase());
+}
+
 /**
  * The route that matched (`/admin/users/:userId`; for a route declared with several paths, the one requested),
- * else the path with its ids masked (`urlTemplate`).
+ * else the path with its ids masked (`urlTemplate`). The mount path is read from the requested URL, not
+ * `req.baseUrl`: Express resets it when an error leaves a mounted router, before the response is written.
  */
 function routeOf(req: Request): string {
+  const pathname = req.originalUrl.split(/[?#]/, 1)[0];
+  const requested = segmentsOf(pathname);
   const declared = (req.route as { path?: unknown } | undefined)?.path;
-  const route = Array.isArray(declared) ? declared.find((path) => path === req.path) : declared;
-  if (typeof route === 'string') return `${req.baseUrl}${route}` || '/';
-  return urlTemplate(req.originalUrl);
+  const candidates: unknown[] = Array.isArray(declared) ? declared : [declared];
+  const route = candidates.find((path): path is string => typeof path === 'string' && matchesTail(path, requested));
+  if (route === undefined) return urlTemplate(pathname);
+  const mount = urlTemplate(`/${requested.slice(0, requested.length - segmentsOf(route).length).join('/')}`);
+  return `${mount === '/' ? '' : mount}${route}`;
 }
 
 export interface RequestLoggerOptions {
