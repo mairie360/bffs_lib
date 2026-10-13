@@ -100,6 +100,48 @@ Never key a rate limit on a `sub` decoded without verification: use `sessionKey`
 For a limit that must hold whatever the caller's IP (failed sign-ins per account, per refresh token), pass
 `perIp: false` with `keyOf`.
 
+## No calls between BFFs, parallel calls, cache (MAIR-525)
+
+A BFF calls the APIs, never another BFF, unless it reuses non-trivial business logic no API has (say why in
+the code and the PR). The caller's roles come from the verified token, not from BFF User `/me`:
+
+```ts
+import { requireSession, sessionRoles } from '@mairie360/bffs-lib';
+
+// `roles` claim signed by Core (MAIR-529); `undefined` for a token issued before it:
+// then read them from Core API GET /api/v1/user/me/ (an API, not BFF User).
+const roles = sessionRoles(req) ?? (await readRolesFromCore(req));
+```
+
+Independent calls start together; lists are read with a bound on the calls in flight:
+
+```ts
+import { mapWithConcurrency, readOffsetPages } from '@mairie360/bffs-lib';
+
+const [projects, events] = await Promise.all([listProjects(req), listEvents(req)]);
+const details = await mapWithConcurrency(ids, 5, (id) => getDetail(req, id));
+// first page, then the others in parallel once the total is known
+const pages = await readOffsetPages({
+  fetchPage: (offset) => api.list({ limit: 500, offset }, options).then((r) => r.data),
+  served: (page) => page.items.length,
+  total: (page) => page.total,
+});
+```
+
+ESLint `no-await-in-loop` is on in the lib and every BFF: a loop that must stay sequential (retries, cursor
+pages) disables it on that line with a comment saying why.
+
+Stable reads (directory, assignable users) can be kept a short time in memory. Key them by caller and clear the
+cache on every write of the BFF; other replicas see the change once the TTL ends:
+
+```ts
+import { MemoryCache, callerKey, sessionUserId } from '@mairie360/bffs-lib';
+
+const directory = new MemoryCache<User[]>({ ttlMs: 30_000 });
+const users = await directory.getOrLoad(callerKey(sessionUserId(req), 'directory'), () => readDirectory(req));
+directory.clear(); // after a write
+```
+
 ## Telemetry (MAIR-504)
 
 OpenTelemetry traces and metrics, exported over OTLP (http/protobuf) to the collector of the instance. Off

@@ -5,6 +5,7 @@ export { notFoundHandler, errorHandler, type ErrorHandlerOptions } from './handl
 export { describeError, maskValues, type DescribeErrorOptions } from './describe-error';
 export { mapUpstreamError, upstreamStatus } from './upstream';
 export { PARIS_TIME_ZONE, parisDate, addDays, parisDateWindow } from './dates';
+export { wallClockToUtc, utcToWallClock, zonedToday, monthBounds } from './time-zone';
 export {
   INVALID_SESSION_MESSAGE,
   bearerToken,
@@ -51,3 +52,6 @@ export {
   type Telemetry,
   type TelemetryOptions,
 } from './telemetry';
+export { DEFAULT_CONCURRENCY, mapWithConcurrency, readOffsetPages, type OffsetPagesOptions } from './concurrency';
+export { MemoryCache, callerKey, type MemoryCacheOptions } from './cache';
+export { roleKey, hasRole, PROJECT_TASK_MANAGER_ROLES } from './roles';
