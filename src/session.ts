@@ -29,17 +29,17 @@ export interface VerifiedSession {
   /** Expiry of the token, in seconds since the epoch. */
   expiresAt: number;
   /**
-   * Names of every role the caller holds, from the `roles` claim Core signs (MAIR-529, MAIR-525), or `undefined`
-   * when the token has no such claim (a token issued before it): the BFF then reads the roles from Core API.
-   * The legacy `role` claim (one role at most) is never used: it may miss the role that grants an access.
+   * Name of the caller's role, from the `role` claim Core signs (MAIR-529), or `undefined` when the claim is
+   * missing or empty (a token issued before it, or a user with no role): the BFF then reads it from Core API.
    */
-  roles?: readonly string[];
+  role?: string;
 }
 
-/** The `roles` claim when it is an array of non-empty strings, trimmed; `undefined` otherwise. */
-function rolesClaim(value: unknown): readonly string[] | undefined {
-  if (!Array.isArray(value) || !value.every((role) => typeof role === 'string')) return undefined;
-  return Object.freeze(value.map((role: string) => role.trim()).filter(Boolean));
+/** The `role` claim when it is a non-blank string, trimmed; `undefined` otherwise. */
+function roleClaim(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const role = value.trim();
+  return role === '' ? undefined : role;
 }
 
 function decodePart(part: string): Record<string, unknown> {
@@ -75,8 +75,8 @@ export function verifySessionToken(
     if (typeof exp !== 'number' || !Number.isFinite(exp) || exp <= nowSeconds) throw new Error('expired');
     const userId = typeof sub === 'string' && /^\d+$/.test(sub) ? Number(sub) : sub;
     if (typeof userId !== 'number' || !Number.isSafeInteger(userId) || userId <= 0) throw new Error('bad sub');
-    const roles = rolesClaim(payload.roles);
-    return roles === undefined ? { userId, expiresAt: exp } : { userId, expiresAt: exp, roles };
+    const role = roleClaim(payload.role);
+    return role === undefined ? { userId, expiresAt: exp } : { userId, expiresAt: exp, role };
   } catch {
     // Never send the parsing detail (base64, JSON, which check failed) to the client.
     throw new HttpError(401, INVALID_TOKEN_MESSAGE);
@@ -119,12 +119,12 @@ export function sessionUserId(req: Request): number {
 }
 
 /**
- * The caller's roles from the verified token (`roles` claim), or `undefined` when the token carries none and the
- * roles must be read from Core API (`GET /api/v1/user/me/`), never from another BFF (MAIR-525). Throws a 401 when
+ * The caller's role from the verified token (`role` claim), or `undefined` when the token carries none and the
+ * role must be read from Core API (`GET /api/v1/user/me/`), never from another BFF (MAIR-525). Throws a 401 when
  * the request did not go through `requireSession`.
  */
-export function sessionRoles(req: Request): readonly string[] | undefined {
+export function sessionRole(req: Request): string | undefined {
   const session = sessions.get(req);
   if (session === undefined) throw new HttpError(401, INVALID_SESSION_MESSAGE);
-  return session.roles;
+  return session.role;
 }
