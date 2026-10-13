@@ -80,6 +80,8 @@ function isTransient(error: unknown): boolean {
 export async function withRetry<T>(call: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
   const retries = options.retries ?? 1;
   const delayMs = options.delayMs ?? 200;
+  // Attempts are sequential by nature: the next one only starts when the previous one failed.
+  /* eslint-disable no-await-in-loop */
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await call();
@@ -88,6 +90,7 @@ export async function withRetry<T>(call: () => Promise<T>, options: RetryOptions
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
+  /* eslint-enable no-await-in-loop */
 }
 
 export interface CallUpstreamOptions {

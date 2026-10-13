@@ -51,3 +51,5 @@ export {
   type Telemetry,
   type TelemetryOptions,
 } from './telemetry';
+export { DEFAULT_CONCURRENCY, mapWithConcurrency, readOffsetPages, type OffsetPagesOptions } from './concurrency';
+export { MemoryCache, callerKey, type MemoryCacheOptions } from './cache';

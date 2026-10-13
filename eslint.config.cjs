@@ -19,6 +19,8 @@ module.exports = [
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       'no-console': 'off',
+      // Independent upstream calls start together (MAIR-525): a sequential loop must say why in a comment.
+      'no-await-in-loop': 'error',
     },
   },
 ];

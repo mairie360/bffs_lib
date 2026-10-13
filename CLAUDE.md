@@ -42,6 +42,8 @@ npm test           # jest, coverage thresholds 90%
 - `src/security.ts`: `securityHeaders`, `apiOnlyHeaders`, `createRateLimiter`, `sessionKey` (MAIR-430)
 - `src/telemetry.ts`: `startTelemetry` (MAIR-504): HTTP + Express instrumentations, OTLP export of traces and metrics, off
   without `OTEL_EXPORTER_OTLP_ENDPOINT`; `RedactingSpanExporter` / `redactSpan` keep only `TELEMETRY_ATTRIBUTES`
+- `src/concurrency.ts`: `mapWithConcurrency`, `readOffsetPages` (MAIR-525): bounded parallel calls, pages read in parallel
+- `src/cache.ts`: `MemoryCache` (TTL, shared in-flight loads, invalidation that drops overtaken loads), `callerKey` (MAIR-525)
 - `src/index.ts`: the public API; anything not exported here is private
 
 ## Rules
@@ -50,6 +52,8 @@ npm test           # jest, coverage thresholds 90%
 - Never log an error as is (MAIR-290): an `HttpError` from `upstreamError` / `callUpstream` keeps the axios error as `cause`, whose `config.headers` hold the caller's Bearer token and `config.data` / `response.data` the request and response bodies. Log `describeError(error)` (name, status, code, method and path of the call, masked message, cause chain, stack frames); `errorHandler` and `checkApis` do by default, a custom `onError` still receives the original error. The CICD's log marker test (`gdpr_marker` job) searches every container's logs for a marker user's values.
 - Telemetry must never export personal data (MAIR-290, MAIR-501): a new span or metric attribute goes through
   `TELEMETRY_ATTRIBUTES` and only if it cannot hold a request value (URL, query, body, header, id, IP).
+- A BFF calls APIs, never another BFF (MAIR-525); independent calls go in parallel, `no-await-in-loop` is an error and
+  each exception says why in a comment. Cached answers are keyed by caller (`callerKey`).
 - A BFF must not answer a status its contract does not declare.
 - The only accepted credential is `Authorization: Bearer <token>`; do not add cookie or custom-header fallbacks.
 - Upstream URLs are `<SERVICE>_URL` (+ `_PORT`), read per call; never a `localhost` default, never read at import time.
