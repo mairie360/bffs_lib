@@ -130,7 +130,7 @@ export interface RequestLoggerOptions {
  * Middleware giving each request an id (`X-Request-Id`, kept from the caller when well-formed) and writing one
  * line when it ends: `method`, `path` (the matched route, never the query string nor an id outside a route
  * parameter), `status`, `duration_ms`, `request_id`. 5xx are written at `error`, the rest at `info`; a request
- * the client abandoned is written at `warn` with `aborted: true`. Mount it first.
+ * the client abandoned (an SSE stream the client closed included) is written at `info` with `aborted: true`. Mount it first.
  */
 export function requestLogger(options: RequestLoggerOptions = {}): RequestHandler {
   const log = options.logger ?? logger;
@@ -154,7 +154,7 @@ export function requestLogger(options: RequestLoggerOptions = {}): RequestHandle
         status: res.statusCode,
         duration_ms: Math.round(Number(process.hrtime.bigint() - started) / 1e4) / 100,
       };
-      if (aborted) log.warn('request aborted', { ...fields, aborted: true });
+      if (aborted) log.info('request aborted', { ...fields, aborted: true });
       else if (res.statusCode >= 500) log.error('request completed', fields);
       else log.info('request completed', fields);
     };

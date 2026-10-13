@@ -204,7 +204,7 @@ logger.error('rollback failed', { request_id: requestId(req), error: describeErr
 - `requestLogger` gives every request an id (`X-Request-Id`, kept from the caller when it is 8-128 characters of
   `[A-Za-z0-9_.-]`, else a UUID; answered in the same header, read with `requestId(req)`) and writes one line when
   it ends: `method`, `path` (the matched route; an unmatched path has its ids masked by `urlTemplate`), `status`,
-  `duration_ms`. 5xx at `error`, an abandoned request at `warn` with `aborted: true`, the rest at `info`.
+  `duration_ms`. 5xx at `error`, a request the client abandoned (an SSE stream it closed included) at `info` with `aborted: true`, the rest at `info`.
   `/health` is not logged.
 - `errorHandler` writes `request failed` (`request_id`, `status`, `error` = `describeError(error)`) for every 5xx,
   `checkApis` writes `upstream unreachable` (`upstream`, `error`) per failed probe, `startTelemetry` routes the

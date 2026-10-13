@@ -137,11 +137,11 @@ describe('requestLogger', () => {
     ]);
   });
 
-  it('writes an abandoned request at warn', async () => {
+  it('writes an abandoned request at info', async () => {
     const { app, lines } = buildApp();
     await request(app).get('/slow').timeout(50).catch(() => undefined);
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(lines).toEqual([expect.objectContaining({ level: 'WARN', message: 'request aborted', aborted: true, path: '/slow' })]);
+    expect(lines).toEqual([expect.objectContaining({ level: 'INFO', message: 'request aborted', aborted: true, path: '/slow' })]);
   });
 
   it('uses the lib logger by default', async () => {
