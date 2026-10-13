@@ -31,6 +31,8 @@ npm test           # jest, coverage thresholds 90%
 - `src/describe-error.ts`: `describeError`, `maskValues` (MAIR-290)
 - `src/upstream.ts`: `mapUpstreamError`, `upstreamError`, `callUpstream`, `withRetry`, `asCaller`, `withoutSession` (MAIR-430)
 - `src/dates.ts`: Paris date helpers
+- `src/time-zone.ts`: `wallClockToUtc`, `utcToWallClock`, `zonedToday`, `monthBounds` (MAIR-525, moved from BFF_Calendar):
+  wall clock of a time zone (Paris by default) <-> UTC instants of the APIs, DST included
 - `src/auth.ts`: Bearer extraction (`authorization`, `requireBearer`), unverified `sub`, `noStore`, `parseTrustProxy` (MAIR-429)
 - `src/session.ts`: session tokens verified by the BFF (MAIR-474): `verifySessionToken` (HS256 with `JWT_SECRET`, `exp`
   without leeway, positive integer `sub`), `requireSession` (401 before any upstream call, 503 without `JWT_SECRET`),
