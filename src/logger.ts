@@ -102,10 +102,13 @@ export const REQUEST_ID_HEADER = 'X-Request-Id';
 /** An incoming id is kept only when it cannot carry anything but an id. */
 const REQUEST_ID = /^[\w.-]{8,128}$/;
 
-const REQUEST_IDS = new WeakMap<Request, string>();
+const REQUEST_IDS = new WeakMap<object, string>();
 
-/** The id `requestLogger` gave this request, or `undefined` when it did not go through it. */
-export function requestId(req: Request): string | undefined {
+/**
+ * The id `requestLogger` gave this request, or `undefined` when it did not go through it. Takes any view of the
+ * request object (`Pick<Request, 'headers'>` of an upstream caller included).
+ */
+export function requestId(req: object): string | undefined {
   return REQUEST_IDS.get(req);
 }
 
