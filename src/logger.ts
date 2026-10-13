@@ -112,9 +112,13 @@ export function requestId(req: object): string | undefined {
   return REQUEST_IDS.get(req);
 }
 
-/** The route that matched (`/admin/users/:userId`), else the path with its ids masked (`urlTemplate`). */
+/**
+ * The route that matched (`/admin/users/:userId`; for a route declared with several paths, the one requested),
+ * else the path with its ids masked (`urlTemplate`).
+ */
 function routeOf(req: Request): string {
-  const route = (req.route as { path?: unknown } | undefined)?.path;
+  const declared = (req.route as { path?: unknown } | undefined)?.path;
+  const route = Array.isArray(declared) ? declared.find((path) => path === req.path) : declared;
   if (typeof route === 'string') return `${req.baseUrl}${route}` || '/';
   return urlTemplate(req.originalUrl);
 }

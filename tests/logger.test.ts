@@ -99,6 +99,7 @@ describe('requestLogger', () => {
     app.get('/health', (_req, res) => res.send('OK'));
     app.get('/boom', (_req, res) => res.status(503).end());
     app.get('/', (_req, res) => res.send('root'));
+    app.get(['/openapi.json', '/swagger.json'], (_req, res) => res.json({}));
     app.get('/slow', (_req, res) => {
       setTimeout(() => res.end(), 200);
     });
@@ -116,6 +117,12 @@ describe('requestLogger', () => {
     ]);
     expect(typeof lines[0].duration_ms).toBe('number');
     expect(JSON.stringify(lines)).not.toMatch(/42|example/);
+  });
+
+  it('writes the requested path of a route declared with several paths', async () => {
+    const { app, lines } = buildApp();
+    await request(app).get('/swagger.json');
+    expect(lines[0]).toEqual(expect.objectContaining({ path: '/swagger.json', status: 200 }));
   });
 
   it('keeps a well-formed incoming request id and replaces any other', async () => {
