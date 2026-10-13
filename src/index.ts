@@ -54,3 +54,4 @@ export {
 } from './telemetry';
 export { DEFAULT_CONCURRENCY, mapWithConcurrency, readOffsetPages, type OffsetPagesOptions } from './concurrency';
 export { MemoryCache, callerKey, type MemoryCacheOptions } from './cache';
+export { roleKey, hasRole, PROJECT_TASK_MANAGER_ROLES } from './roles';

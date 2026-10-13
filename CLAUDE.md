@@ -45,6 +45,7 @@ npm test           # jest, coverage thresholds 90%
 - `src/telemetry.ts`: `startTelemetry` (MAIR-504): HTTP + Express instrumentations, OTLP export of traces and metrics, off
   without `OTEL_EXPORTER_OTLP_ENDPOINT`; `RedactingSpanExporter` / `redactSpan` keep only `TELEMETRY_ATTRIBUTES`
 - `src/concurrency.ts`: `mapWithConcurrency`, `readOffsetPages` (MAIR-525): bounded parallel calls, pages read in parallel
+- `src/roles.ts`: `roleKey`, `hasRole`, `PROJECT_TASK_MANAGER_ROLES` (MAIR-525): role names compared normalized
 - `src/cache.ts`: `MemoryCache` (TTL, shared in-flight loads, invalidation that drops overtaken loads), `callerKey` (MAIR-525)
 - `src/index.ts`: the public API; anything not exported here is private
 
