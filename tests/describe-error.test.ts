@@ -1,6 +1,7 @@
 import { inspect } from 'node:util';
 import express from 'express';
 import request from 'supertest';
+import { captureLogs } from './support/capture-logs';
 import { asCaller, callUpstream, checkApis, describeError, errorHandler, HttpError, maskValues, upstreamError } from '../src';
 
 const TOKEN = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0MiJ9.c2lnbmF0dXJlbWFya2Vy';
@@ -117,21 +118,19 @@ describe('error handler with an Authorization header (MAIR-290)', () => {
     ['a 5xx answer', { status: 500, code: 'ERR_BAD_RESPONSE' }],
     ['no answer', { code: 'ECONNREFUSED' }],
   ])('logs %s without the token nor the bodies', async (_label, failure) => {
-    const logged: string[] = [];
-    jest.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
-      logged.push(args.map((arg) => (typeof arg === 'string' ? arg : inspect(arg, { depth: 10 }))).join(' '));
-    });
+    const logs = captureLogs();
     const res = await request(buildApp(failure))
       .post('/login')
       .set('Authorization', `Bearer ${TOKEN}`)
       .send({ email: EMAIL, password: PASSWORD, phone: PHONE });
 
+    jest.restoreAllMocks();
     expect(res.status).toBe(502);
     expectClean(JSON.stringify(res.body));
-    expect(logged).toHaveLength(1);
-    expect(logged[0]).toMatch(/^HttpError 502 BAD_GATEWAY/);
-    expect(logged[0]).toContain('caused by AxiosError');
-    expectClean(logged[0]);
+    expect(logs).toHaveLength(1);
+    expect(logs[0].error).toMatch(/^HttpError 502 BAD_GATEWAY/);
+    expect(logs[0].error).toContain('caused by AxiosError');
+    expectClean(JSON.stringify(logs));
   });
 
   it('still hands the original error to a custom onError', async () => {
@@ -148,16 +147,14 @@ describe('error handler with an Authorization header (MAIR-290)', () => {
 
 describe('checkApis default report', () => {
   it('logs the unreachable upstream without the values', async () => {
-    const warned: string[] = [];
-    jest.spyOn(console, 'warn').mockImplementation((message: string) => {
-      warned.push(message);
-    });
+    const logs = captureLogs();
     const app = express();
     app.get('/check_apis', checkApis({ core_api: () => Promise.reject(axiosError({ status: 503, code: 'ERR_BAD_RESPONSE' })) }));
     const res = await request(app).get('/check_apis');
-    expect(res.status).toBe(502);
-    expect(warned[0]).toMatch(/^\[check_apis\] core_api unreachable: AxiosError 503 ERR_BAD_RESPONSE POST \/api\/v1\/auth\/login/);
-    expectClean(warned.join('\n'));
     jest.restoreAllMocks();
+    expect(res.status).toBe(502);
+    expect(logs[0]).toEqual(expect.objectContaining({ upstream: 'core_api' }));
+    expect(logs[0].error).toMatch(/^AxiosError 503 ERR_BAD_RESPONSE POST \/api\/v1\/auth\/login/);
+    expectClean(JSON.stringify(logs));
   });
 });

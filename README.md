@@ -1,6 +1,6 @@
 # bffs_lib
 
-`@mairie360/bffs-lib`: shared building blocks of the Mairie 360 BFFs (MAIR-234, MAIR-429, MAIR-430, MAIR-431, MAIR-504).
+`@mairie360/bffs-lib`: shared building blocks of the Mairie 360 BFFs (MAIR-234, MAIR-429, MAIR-430, MAIR-431, MAIR-504, MAIR-531).
 A BFF must use these instead of keeping its own copy.
 
 ## Error envelope
@@ -176,6 +176,44 @@ import app from './app';
 | `OTEL_SERVICE_NAME` | overrides `serviceName` |
 | `OTEL_RESOURCE_ATTRIBUTES` | extra resource attributes, e.g. `deployment.environment.name=prod` |
 
+## Structured logs (MAIR-531)
+
+Every BFF logs through the lib: one JSON object per line on stdout, the shape the APIs print with
+`LOG_FORMAT=json` (flattened), so one collector query reads both.
+
+```json
+{"timestamp":"2026-10-13T08:30:00.000Z","level":"INFO","target":"bff-user","message":"request completed","request_id":"7f1c…","method":"GET","path":"/admin/users/:userId","status":200,"duration_ms":12.4}
+```
+
+```ts
+// src/logger.ts
+import { createLogger } from '@mairie360/bffs-lib';
+export const logger = createLogger({ target: 'bff-user' });
+
+// src/app.ts: first middleware, and the same logger for the final handlers
+app.use(requestLogger({ logger }));
+app.get('/check_apis', checkApis({ core_api: probe }, { logger }));
+app.use(notFoundHandler);
+app.use(errorHandler({ logger }));
+
+// anywhere else, instead of console.*
+logger.warn('session revocation failed on logout', { request_id: requestId(req), status });
+logger.error('rollback failed', { request_id: requestId(req), error: describeError(error) });
+```
+
+- `requestLogger` gives every request an id (`X-Request-Id`, kept from the caller when it is 8-128 characters of
+  `[A-Za-z0-9_.-]`, else a UUID; answered in the same header, read with `requestId(req)`) and writes one line when
+  it ends: `method`, `path` (the matched route; an unmatched path has its ids masked by `urlTemplate`), `status`,
+  `duration_ms`. 5xx at `error`, an abandoned request at `warn` with `aborted: true`, the rest at `info`.
+  `/health` is not logged.
+- `errorHandler` writes `request failed` (`request_id`, `status`, `error` = `describeError(error)`) for every 5xx,
+  `checkApis` writes `upstream unreachable` (`upstream`, `error`) per failed probe, `startTelemetry` routes the
+  OpenTelemetry diagnostics through `diagLogger`.
+- `trace_id` / `span_id` are added when a span is active (telemetry on).
+- Fields are scalars only: a header, a body or an error object cannot be passed as is. Log errors through
+  `describeError` (MAIR-290); never log an e-mail, a token, a query string or a request body.
+- `LOG_LEVEL` (`debug`, `info`, `warn`, `error`; default `info`) is read on every line.
+
 ## Usage
 
 ```ts
@@ -216,6 +254,7 @@ const { from, to } = parisDateWindow(30);
 | `checkApis(probes)`, `checkApisResponseSchema(names)` | `/check_apis` handler (200 / 502) and its contract schema |
 | `securityHeaders`, `apiOnlyHeaders(docsPath)` | helmet setup shared by every BFF; strict headers outside `/docs` |
 | `createRateLimiter(options)`, `sessionKey(req)` | express-rate-limit with the envelope and `<prefix>_*` env; unforgeable per-session key |
+| `createLogger(options)`, `logger`, `requestLogger(options)`, `requestId(req)` | JSON logs, one line per event; request log with id, route, status, duration (MAIR-531) |
 | `startTelemetry(options)`, `telemetryEnabled()` | OpenTelemetry for a BFF, off without `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | `redactSpan`, `RedactingSpanExporter`, `urlTemplate`, `TELEMETRY_ATTRIBUTES` | attribute allowlist applied to every exported span |
 

@@ -45,6 +45,7 @@ export {
   UNTRACED_PATHS,
   TELEMETRY_SHUTDOWN_TIMEOUT_MS,
   RedactingSpanExporter,
+  diagLogger,
   redactSpan,
   urlTemplate,
   telemetryEnabled,
@@ -55,3 +56,17 @@ export {
 export { DEFAULT_CONCURRENCY, mapWithConcurrency, readOffsetPages, type OffsetPagesOptions } from './concurrency';
 export { MemoryCache, callerKey, type MemoryCacheOptions } from './cache';
 export { roleKey, hasRole, PROJECT_TASK_MANAGER_ROLES } from './roles';
+export {
+  LOG_LEVELS,
+  REQUEST_ID_HEADER,
+  createLogger,
+  logger,
+  requestId,
+  requestLogger,
+  type LogFields,
+  type LogLevel,
+  type LogValue,
+  type Logger,
+  type LoggerOptions,
+  type RequestLoggerOptions,
+} from './logger';
