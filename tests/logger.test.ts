@@ -116,7 +116,8 @@ describe('requestLogger', () => {
       expect.objectContaining({ level: 'INFO', message: 'request completed', method: 'GET', path: '/users/:userId', status: 200, request_id: res.headers['x-request-id'] }),
     ]);
     expect(typeof lines[0].duration_ms).toBe('number');
-    expect(JSON.stringify(lines)).not.toMatch(/42|example/);
+    // Neither the id nor the query string: only the route is written (request_id is random, it may hold "42").
+    expect(Object.values(lines[0]).filter((value) => value !== lines[0].request_id).join(' ')).not.toMatch(/\b42\b|example/);
   });
 
   it('writes the requested path of a route declared with several paths', async () => {
