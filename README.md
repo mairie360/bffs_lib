@@ -267,6 +267,7 @@ const { from, to } = parisDateWindow(30);
 | `upstreamError(service, error, declared)`, `callUpstream(service, call, options)` | one mapping of upstream failures: no answer / invalid answer / undeclared status -> 502 |
 | `withRetry(call, options)` | retry on no answer, 502, 503, 504; idempotent calls only |
 | `validationError(location, issues)`, `parseRequest(schema, value, location)` | 400 `Validation failed` with `<location>.<path>` details |
+| `textField({ max, min?, multiline?, noMarkup? })` | zod string validated like the Rust APIs (length in code points, blank, control characters, `<>`), so a bad field is a detailed 400 from the BFF, not the API's bare one (MAIR-560) |
 | `checkApis(probes)`, `checkApisResponseSchema(names)` | `/check_apis` handler (200 / 502) and its contract schema |
 | `securityHeaders`, `apiOnlyHeaders(docsPath)` | helmet setup shared by every BFF; strict headers outside `/docs` |
 | `createRateLimiter(options)`, `sessionKey(req)` | express-rate-limit with the envelope and `<prefix>_*` env; unforgeable per-session key |
