@@ -10,6 +10,8 @@ export const UPSTREAM_TIMEOUT_MS = 10_000;
  * Turns a failed upstream call (generated client, axios, fetch wrapper) into the error the BFF answers with.
  *
  * - no HTTP status (network error, timeout, bad payload) -> 502
+ * - a 429 (the upstream rate limit) -> 429 with the upstream `Retry-After` (MAIR-562), declared or not: the BFF's
+ *   own rate limiter already answers 429 on every route, and a 502 would hide that the caller only has to wait
  * - a status the BFF contract declares for this route -> same status, generic message
  * - any other status, 4xx or 5xx -> 502, so the BFF never answers a status its contract does not declare
  *
@@ -19,6 +21,7 @@ export const UPSTREAM_TIMEOUT_MS = 10_000;
 export function mapUpstreamError(error: unknown, declaredStatuses: readonly number[] = []): HttpError {
   if (error instanceof HttpError) return error;
   const status = upstreamStatus(error);
+  if (status === 429) return new HttpError(429, undefined, { cause: error, retryAfterSeconds: upstreamRetryAfterSeconds(error) ?? 1 });
   if (status !== undefined && status >= 400 && status < 500 && declaredStatuses.includes(status)) {
     return new HttpError(status, undefined, { cause: error });
   }
@@ -31,6 +34,34 @@ export function upstreamStatus(error: unknown): number | undefined {
   const { status, response } = error as { status?: unknown; response?: { status?: unknown } };
   const value = typeof status === 'number' ? status : response?.status;
   return typeof value === 'number' && value >= 400 && value < 600 ? value : undefined;
+}
+
+/**
+ * `Retry-After` of a failed upstream answer, in whole seconds (rounded up, at least 0), from `headers` or
+ * `response.headers` (plain object or axios `AxiosHeaders`). Accepts delay-seconds and HTTP dates; `undefined`
+ * when absent or unreadable.
+ */
+export function upstreamRetryAfterSeconds(error: unknown, now: number = Date.now()): number | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const { headers, response } = error as { headers?: unknown; response?: { headers?: unknown } };
+  const raw = headerValue(headers ?? response?.headers, 'retry-after');
+  if (raw === undefined) return undefined;
+  const value = raw.trim();
+  if (/^\d+$/.test(value)) return Number(value);
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? undefined : Math.max(0, Math.ceil((date - now) / 1000));
+}
+
+function headerValue(headers: unknown, name: string): string | undefined {
+  if (typeof headers !== 'object' || headers === null) return undefined;
+  const getter = (headers as { get?: unknown }).get;
+  if (typeof getter === 'function') {
+    const value: unknown = getter.call(headers, name);
+    if (typeof value === 'string' || typeof value === 'number') return String(value);
+  }
+  const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === name);
+  const value: unknown = Array.isArray(entry?.[1]) ? entry?.[1][0] : entry?.[1];
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : undefined;
 }
 
 /** True for an axios error that never got an answer (connection refused, DNS, timeout, aborted). */
@@ -63,7 +94,15 @@ export interface RetryOptions {
   retries?: number;
   /** Delay before each extra attempt, in ms. Default 200. */
   delayMs?: number;
+  /**
+   * Longest `Retry-After` of an upstream 429 worth waiting for, in ms (MAIR-562). A longer one is thrown at once,
+   * so the client gets the 429 instead of a request hanging. Default 2000.
+   */
+  maxRetryAfterMs?: number;
 }
+
+/** Delay before retrying `error`, or `undefined` when it must be thrown. */
+type RetryPolicy = (error: unknown, options: Required<RetryOptions>) => number | undefined;
 
 /** A failure worth retrying: no answer at all, or a 502/503/504 from the upstream. */
 function isTransient(error: unknown): boolean {
@@ -73,31 +112,71 @@ function isTransient(error: unknown): boolean {
   return status === 502 || status === 503 || status === 504;
 }
 
-/**
- * Runs `call` again on a transient failure (no answer, 502, 503, 504). **Idempotent calls only**
- * (GET, PUT, DELETE): a retried POST may be applied twice upstream.
- */
-export async function withRetry<T>(call: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
-  const retries = options.retries ?? 1;
-  const delayMs = options.delayMs ?? 200;
+/** An upstream 429: the request was refused before being applied, so it is safe to send again, POST included. */
+function isRateLimited(error: unknown): boolean {
+  return !(error instanceof HttpError) && upstreamStatus(error) === 429;
+}
+
+/** Wait of a 429: its `Retry-After` (at least `delayMs`), `undefined` beyond `maxRetryAfterMs`. */
+function rateLimitDelay(error: unknown, options: Required<RetryOptions>): number | undefined {
+  const retryAfterMs = (upstreamRetryAfterSeconds(error) ?? 0) * 1000;
+  return retryAfterMs > options.maxRetryAfterMs ? undefined : Math.max(options.delayMs, retryAfterMs);
+}
+
+const transientOrRateLimited: RetryPolicy = (error, options) => {
+  if (isRateLimited(error)) return rateLimitDelay(error, options);
+  return isTransient(error) ? options.delayMs : undefined;
+};
+
+const rateLimitedOnly: RetryPolicy = (error, options) => (isRateLimited(error) ? rateLimitDelay(error, options) : undefined);
+
+async function retrying<T>(call: () => Promise<T>, policy: RetryPolicy, options: RetryOptions): Promise<T> {
+  const resolved: Required<RetryOptions> = {
+    retries: options.retries ?? 1,
+    delayMs: options.delayMs ?? 200,
+    maxRetryAfterMs: options.maxRetryAfterMs ?? 2000,
+  };
   // Attempts are sequential by nature: the next one only starts when the previous one failed.
   /* eslint-disable no-await-in-loop */
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await call();
     } catch (error) {
-      if (attempt >= retries || !isTransient(error)) throw error;
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const delay = attempt < resolved.retries ? policy(error, resolved) : undefined;
+      if (delay === undefined) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
   /* eslint-enable no-await-in-loop */
 }
 
+/**
+ * Runs `call` again on a transient failure (no answer, 502, 503, 504) or an upstream 429 (after its `Retry-After`,
+ * see `maxRetryAfterMs`). **Idempotent calls only** (GET, PUT, DELETE): a retried POST may be applied twice
+ * upstream after a transient failure. Use `withRateLimitRetry` for the others.
+ */
+export async function withRetry<T>(call: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
+  return retrying(call, transientOrRateLimited, options);
+}
+
+/**
+ * Runs `call` again on an upstream 429 only, after its `Retry-After` (MAIR-562). Safe for any method: a 429 is
+ * refused before anything is applied.
+ */
+export async function withRateLimitRetry<T>(call: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
+  return retrying(call, rateLimitedOnly, options);
+}
+
 export interface CallUpstreamOptions {
   /** Upstream 4xx the route declares in its contract and relays as is; anything else becomes a 502. */
   declared?: readonly number[];
-  /** Retry transient failures: set only for idempotent calls (see `withRetry`). */
+  /** Retry transient failures and 429: set only for idempotent calls (see `withRetry`). */
   retry?: RetryOptions | boolean;
+  /**
+   * Retry an upstream 429 only, after its `Retry-After` (see `withRateLimitRetry`), for any method. Ignored when
+   * `retry` is set, which already covers it.
+   */
+  retryRateLimited?: RetryOptions | boolean;
 }
 
 /**
@@ -106,8 +185,10 @@ export interface CallUpstreamOptions {
  */
 export async function callUpstream<T>(service: string, call: () => Promise<T>, options: CallUpstreamOptions = {}): Promise<T> {
   const retry = options.retry === true ? {} : options.retry || undefined;
+  const rateLimited = options.retryRateLimited === true ? {} : options.retryRateLimited || undefined;
   try {
-    return retry ? await withRetry(call, retry) : await call();
+    if (retry) return await withRetry(call, retry);
+    return rateLimited ? await withRateLimitRetry(call, rateLimited) : await call();
   } catch (error) {
     throw upstreamError(service, error, options.declared);
   }
