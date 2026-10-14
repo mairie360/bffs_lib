@@ -87,6 +87,132 @@ describe('createLogger', () => {
   });
 });
 
+describe('createLogger formats (MAIR-555)', () => {
+  const NOW = () => Date.UTC(2026, 9, 13, 8, 30);
+  const tty = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+
+  afterEach(() => {
+    if (tty) Object.defineProperty(process.stdout, 'isTTY', tty);
+    else delete (process.stdout as { isTTY?: boolean }).isTTY;
+  });
+
+  function textLogger(options: Parameters<typeof createLogger>[0] = {}) {
+    const lines: string[] = [];
+    const log = createLogger({ now: NOW, target: 'bff-user', format: 'text', colors: false, write: (line) => lines.push(line), ...options });
+    return { log, lines };
+  }
+
+  /** Raw lines written on stdout, with stdout seen as a terminal or not. */
+  function stdoutLines(isTTY: boolean): string[] {
+    Object.defineProperty(process.stdout, 'isTTY', { value: isTTY, configurable: true });
+    const lines: string[] = [];
+    jest.spyOn(process.stdout, 'write').mockImplementation(((chunk: string) => {
+      lines.push(...String(chunk).split('\n').filter(Boolean));
+      return true;
+    }) as typeof process.stdout.write);
+    return lines;
+  }
+
+  it('writes text lines like the APIs: timestamp, padded level, target, message, then key=value', () => {
+    const { log, lines } = textLogger();
+    log.info('request completed', { request_id: 'abc', status: 200, cached: false, none: null, missing: undefined });
+    log.warn('slow', { path: '/a b', empty: '', quote: 'say "hi"', eq: 'a=b' });
+    expect(lines).toEqual([
+      '2026-10-13T08:30:00.000Z  INFO bff-user: request completed request_id=abc status=200 cached=false none=null',
+      '2026-10-13T08:30:00.000Z  WARN bff-user: slow path="/a b" empty="" quote="say \\"hi\\"" eq="a=b"',
+    ]);
+  });
+
+  it('keeps a text line on one line whatever the message or the fields hold', () => {
+    const { log, lines } = textLogger();
+    log.error('forged\n2026-01-01T00:00:00.000Z  INFO bff-user: fake', { value: 'a\nb\u001b[31m' });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain('\n');
+    expect(lines[0]).not.toContain('\u001b');
+    expect(lines[0]).toBe(
+      '2026-10-13T08:30:00.000Z ERROR bff-user: forged\\n2026-01-01T00:00:00.000Z  INFO bff-user: fake value="a\\nb\\u001b[31m"',
+    );
+  });
+
+  it('colours the level, dims the timestamp and target, italicises the keys', () => {
+    const { log, lines } = textLogger({ colors: true });
+    log.error('failed', { status: 502 });
+    log.debug('hidden');
+    process.env.LOG_LEVEL = 'debug';
+    log.debug('shown');
+    expect(lines).toEqual([
+      '\u001b[2m2026-10-13T08:30:00.000Z\u001b[0m \u001b[31mERROR\u001b[0m \u001b[2mbff-user:\u001b[0m failed \u001b[3mstatus\u001b[0m=502',
+      '\u001b[2m2026-10-13T08:30:00.000Z\u001b[0m \u001b[34mDEBUG\u001b[0m \u001b[2mbff-user:\u001b[0m shown',
+    ]);
+  });
+
+  it('writes coloured text on a terminal outside the tests', () => {
+    process.env.NODE_ENV = 'development';
+    delete process.env.LOG_FORMAT;
+    delete process.env.NO_COLOR;
+    delete process.env.FORCE_COLOR;
+    const lines = stdoutLines(true);
+    createLogger({ now: NOW, target: 'bff-user' }).info('hello', { status: 1 });
+    jest.restoreAllMocks();
+    expect(lines).toEqual(['\u001b[2m2026-10-13T08:30:00.000Z\u001b[0m \u001b[32m INFO\u001b[0m \u001b[2mbff-user:\u001b[0m hello \u001b[3mstatus\u001b[0m=1']);
+  });
+
+  it('keeps JSON in containers, in the tests, for a custom writer and with LOG_FORMAT=json', () => {
+    process.env.NODE_ENV = 'production';
+    delete process.env.LOG_FORMAT;
+    const piped = stdoutLines(false);
+    createLogger({ now: NOW }).info('container');
+    process.env.NODE_ENV = 'test';
+    const tests = stdoutLines(true);
+    createLogger({ now: NOW }).info('tests');
+    process.env.NODE_ENV = 'production';
+    process.env.LOG_FORMAT = ' JSON ';
+    const forced = stdoutLines(true);
+    createLogger({ now: NOW }).info('forced');
+    jest.restoreAllMocks();
+    delete process.env.LOG_FORMAT;
+    const custom: string[] = [];
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    createLogger({ now: NOW, write: (line) => custom.push(line) }).info('custom');
+    for (const [lines, message] of [[piped, 'container'], [tests, 'tests'], [forced, 'forced'], [custom, 'custom']] as const) {
+      expect(lines.map((line) => JSON.parse(line))).toEqual([{ timestamp: '2026-10-13T08:30:00.000Z', level: 'INFO', target: 'bff', message }]);
+    }
+  });
+
+  it('reads LOG_FORMAT on every line and ignores an unknown value', () => {
+    const lines: string[] = [];
+    const log = createLogger({ now: NOW, colors: false, write: (line) => lines.push(line) });
+    process.env.LOG_FORMAT = 'Text';
+    log.info('a');
+    process.env.LOG_FORMAT = 'yaml';
+    log.info('b');
+    expect(lines[0]).toBe('2026-10-13T08:30:00.000Z  INFO bff: a');
+    expect(JSON.parse(lines[1])).toEqual(expect.objectContaining({ message: 'b' }));
+  });
+
+  it('follows FORCE_COLOR then NO_COLOR, else colours on a terminal only', () => {
+    process.env.LOG_FORMAT = 'text';
+    const colored = (line: string) => line.includes('\u001b[');
+    const run = (isTTY: boolean, env: Record<string, string | undefined>) => {
+      delete process.env.FORCE_COLOR;
+      delete process.env.NO_COLOR;
+      Object.assign(process.env, env);
+      for (const [key, value] of Object.entries(env)) if (value === undefined) delete process.env[key];
+      const lines = stdoutLines(isTTY);
+      createLogger({ now: NOW }).info('x');
+      jest.restoreAllMocks();
+      return colored(lines[0]);
+    };
+    expect(run(true, {})).toBe(true);
+    expect(run(false, {})).toBe(false);
+    expect(run(true, { NO_COLOR: '1' })).toBe(false);
+    expect(run(false, { FORCE_COLOR: '1' })).toBe(true);
+    expect(run(true, { FORCE_COLOR: '1', NO_COLOR: '1' })).toBe(true);
+    expect(run(true, { FORCE_COLOR: '0' })).toBe(false);
+    expect(run(true, { FORCE_COLOR: 'false' })).toBe(false);
+  });
+});
+
 describe('requestLogger', () => {
   function buildApp(log = memoryLogger()) {
     const app = express();

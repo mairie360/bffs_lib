@@ -5,7 +5,8 @@ import { urlTemplate } from './telemetry';
 
 /**
  * Structured logs of the BFFs (MAIR-531): one JSON object per line on stdout, the shape the APIs print with
- * `LOG_FORMAT=json` flattened (`timestamp`, `level`, `target`, `message`, then the fields).
+ * `LOG_FORMAT=json` flattened (`timestamp`, `level`, `target`, `message`, then the fields). On a terminal, the
+ * lines are human-readable and coloured instead, like the APIs' default format (MAIR-555): see `LogFormat`.
  *
  * Fields are scalars only, so a header or body cannot be logged by passing the object: log an error through
  * `describeError(error)` (MAIR-290), never the error itself, and never an e-mail, a token or a request value.
@@ -27,6 +28,14 @@ export interface Logger {
   child(fields: LogFields): Logger;
 }
 
+/**
+ * `json`: one JSON object per line. `text`: `timestamp LEVEL target: message key=value…`, the APIs' default format.
+ * Default: `LOG_FORMAT`, read on every line, else `text` when the lines go to a terminal outside the tests
+ * (`NODE_ENV=test`), else `json` (containers, log collectors).
+ */
+export const LOG_FORMATS = ['json', 'text'] as const;
+export type LogFormat = (typeof LOG_FORMATS)[number];
+
 export interface LoggerOptions {
   /** `target` of every line, usually the service name (`bff-user`). Default `bff`. */
   target?: string;
@@ -34,6 +43,13 @@ export interface LoggerOptions {
   level?: LogLevel;
   /** Fields added to every line. */
   fields?: LogFields;
+  /** Line format. Default: see `LogFormat`. */
+  format?: LogFormat;
+  /**
+   * ANSI colours of the `text` format. Default: `FORCE_COLOR` set (and not `0` / `false`) colours, else `NO_COLOR`
+   * set does not, else colours when the lines go to a terminal. Never applied to `json`.
+   */
+  colors?: boolean;
   /** Where a line goes (without its newline). Default: `process.stdout`. */
   write?: (line: string) => void;
   /** Clock of the `timestamp`. Default: `Date.now`. */
@@ -54,6 +70,57 @@ function traceFields(): LogFields {
   return context && isSpanContextValid(context) ? { trace_id: context.traceId, span_id: context.spanId } : {};
 }
 
+/** Whether the default writer goes to a terminal. */
+function stdoutIsTty(): boolean {
+  return process.stdout.isTTY === true;
+}
+
+function formatOf(value: string | undefined, toTerminal: boolean): LogFormat {
+  const format = value?.trim().toLowerCase();
+  if ((LOG_FORMATS as readonly string[]).includes(format ?? '')) return format as LogFormat;
+  return toTerminal && process.env.NODE_ENV !== 'test' ? 'text' : 'json';
+}
+
+function colorsOf(toTerminal: boolean): boolean {
+  const force = process.env.FORCE_COLOR?.trim().toLowerCase();
+  if (force !== undefined && force !== '') return force !== '0' && force !== 'false';
+  if (process.env.NO_COLOR) return false;
+  return toTerminal;
+}
+
+const RESET = '\x1b[0m';
+const DIM = '\x1b[2m';
+const ITALIC = '\x1b[3m';
+const LEVEL_COLORS: Readonly<Record<LogLevel, string>> = {
+  debug: '\x1b[34m',
+  info: '\x1b[32m',
+  warn: '\x1b[33m',
+  error: '\x1b[31m',
+};
+
+/** A text value on one line: quoted (JSON escapes) when empty or holding a space, `=`, a quote or a control character. */
+function textValue(value: LogValue): string {
+  const text = String(value);
+  return text === '' || /[\s="\\\p{Cc}]/u.test(text) ? JSON.stringify(text) : text;
+}
+
+/** The message on one line: control characters escaped, so a value inside it cannot forge another line. */
+function textMessage(message: string): string {
+  return /\p{Cc}/u.test(message) ? JSON.stringify(message).slice(1, -1) : message;
+}
+
+/** `2026-10-13T08:30:00.000Z  INFO bff-user: request completed status=200`, coloured like `tracing`. */
+function textLine(line: Record<string, LogValue>, level: LogLevel, colors: boolean): string {
+  const paint = (style: string, text: string) => (colors ? `${style}${text}${RESET}` : text);
+  const parts = [
+    paint(DIM, String(line.timestamp)),
+    paint(LEVEL_COLORS[level], level.toUpperCase().padStart(5)),
+    `${paint(DIM, `${String(line.target)}:`)} ${textMessage(String(line.message))}`,
+  ];
+  for (const [key, value] of Object.entries(line)) if (!RESERVED.has(key)) parts.push(`${paint(ITALIC, key)}=${textValue(value)}`);
+  return parts.join(' ');
+}
+
 function scalar(value: LogValue): LogValue {
   if (typeof value === 'number' && !Number.isFinite(value)) return String(value);
   return typeof value === 'object' && value !== null ? '[object]' : value;
@@ -61,6 +128,8 @@ function scalar(value: LogValue): LogValue {
 
 export function createLogger(options: LoggerOptions = {}): Logger {
   const write = options.write ?? ((line: string) => process.stdout.write(`${line}\n`));
+  // Only the default writer can reach a terminal: a custom one gets JSON unless asked otherwise.
+  const toTerminal = () => options.write === undefined && stdoutIsTty();
   const now = options.now ?? Date.now;
   const { target: childTarget, ...base } = options.fields ?? {};
   const target = typeof childTarget === 'string' && childTarget ? childTarget : (options.target ?? 'bff');
@@ -78,7 +147,8 @@ export function createLogger(options: LoggerOptions = {}): Logger {
       if (value !== undefined && !RESERVED.has(key)) line[key] = scalar(value);
     }
     try {
-      write(JSON.stringify(line));
+      const format = options.format ?? formatOf(process.env.LOG_FORMAT, toTerminal());
+      write(format === 'text' ? textLine(line, level, options.colors ?? colorsOf(toTerminal())) : JSON.stringify(line));
     } catch {
       // A log line must never break the request that wrote it.
     }

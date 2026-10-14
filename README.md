@@ -214,6 +214,22 @@ logger.error('rollback failed', { request_id: requestId(req), error: describeErr
   `describeError` (MAIR-290); never log an e-mail, a token, a query string or a request body.
 - `LOG_LEVEL` (`debug`, `info`, `warn`, `error`; default `info`) is read on every line.
 
+### Readable logs on a terminal (MAIR-555)
+
+On a terminal, the same lines are written in the APIs' default `tracing` format, coloured by level:
+
+```text
+2026-10-13T08:30:00.000Z  INFO bff-user: request completed method=GET path=/admin/users/:userId status=200
+```
+
+- `LOG_FORMAT` (`json` or `text`, read on every line) chooses the format. Unset: `text` when stdout is a terminal
+  and `NODE_ENV` is not `test`, else `json`. Containers, Kubernetes and the tests therefore keep JSON with no setting.
+- Colours (text only): `FORCE_COLOR` set (not `0` / `false`) forces them, else `NO_COLOR` turns them off, else
+  they follow the terminal.
+- A text line stays on one line: control characters of the message and values are escaped, and a value holding a
+  space, `=` or a quote is quoted.
+- `createLogger({ format, colors })` overrides both; a logger with a custom `write` writes JSON unless asked otherwise.
+
 ## Usage
 
 ```ts

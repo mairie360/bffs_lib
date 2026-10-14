@@ -57,6 +57,7 @@ export { DEFAULT_CONCURRENCY, mapWithConcurrency, readOffsetPages, type OffsetPa
 export { MemoryCache, callerKey, type MemoryCacheOptions } from './cache';
 export { roleKey, hasRole, PROJECT_TASK_MANAGER_ROLES } from './roles';
 export {
+  LOG_FORMATS,
   LOG_LEVELS,
   REQUEST_ID_HEADER,
   createLogger,
@@ -64,6 +65,7 @@ export {
   requestId,
   requestLogger,
   type LogFields,
+  type LogFormat,
   type LogLevel,
   type LogValue,
   type Logger,
