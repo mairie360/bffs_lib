@@ -47,6 +47,8 @@ npm test           # jest, coverage thresholds 90%
 - `src/logger.ts`: `createLogger`, `logger`, `requestLogger`, `requestId` (MAIR-531): JSON lines on stdout
   (`timestamp`, `level`, `target`, `message`, scalar fields), request log (method, route, status, duration, request id);
   `errorHandler`, `checkApis` and the OpenTelemetry diagnostics (`diagLogger`) write through it
+  - MAIR-555: `LOG_FORMAT` `json`/`text`; unset = coloured text on a terminal outside `NODE_ENV=test`, JSON otherwise
+    (`FORCE_COLOR` > `NO_COLOR` > TTY for colours). Containers must keep JSON: never make text the default off a TTY.
 - `src/concurrency.ts`: `mapWithConcurrency`, `readOffsetPages` (MAIR-525): bounded parallel calls, pages read in parallel
 - `src/roles.ts`: `roleKey`, `hasRole`, `PROJECT_TASK_MANAGER_ROLES` (MAIR-525): role names compared normalized
 - `src/cache.ts`: `MemoryCache` (TTL, shared in-flight loads, invalidation that drops overtaken loads), `callerKey` (MAIR-525)
@@ -56,7 +58,7 @@ npm test           # jest, coverage thresholds 90%
 
 - Never forward upstream messages or bodies to clients, and never leak the message of an unexpected error.
 - Never log an error as is (MAIR-290): an `HttpError` from `upstreamError` / `callUpstream` keeps the axios error as `cause`, whose `config.headers` hold the caller's Bearer token and `config.data` / `response.data` the request and response bodies. Log `describeError(error)` (name, status, code, method and path of the call, masked message, cause chain, stack frames); `errorHandler` and `checkApis` do by default, a custom `onError` still receives the original error. The CICD's log marker test (`gdpr_marker` job) searches every container's logs for a marker user's values.
-- Logs go through `createLogger` / `logger` (MAIR-531), never `console.*`: one JSON line per event, scalar fields only.
+- Logs go through `createLogger` / `logger` (MAIR-531), never `console.*`: one line per event (JSON, or text on a terminal), scalar fields only.
 - Telemetry must never export personal data (MAIR-290, MAIR-501): a new span or metric attribute goes through
   `TELEMETRY_ATTRIBUTES` and only if it cannot hold a request value (URL, query, body, header, id, IP).
 - A BFF calls APIs, never another BFF (MAIR-525); independent calls go in parallel, `no-await-in-loop` is an error and
