@@ -269,6 +269,7 @@ const { from, to } = parisDateWindow(30);
 | `withRetry(call, options)` | retry on no answer, 502, 503, 504, and on 429 after `Retry-After`; idempotent calls only |
 | `withRateLimitRetry(call, options)` | retry on 429 only, after `Retry-After` (capped by `maxRetryAfterMs`); safe for POST (`callUpstream` option `retryRateLimited`) |
 | `validationError(location, issues)`, `parseRequest(schema, value, location)` | 400 `Validation failed` with `<location>.<path>` details |
+| `textField({ max, min?, multiline?, noMarkup? })` | zod string validated like the Rust APIs (length in code points, blank, control characters, `<>`), so a bad field is a detailed 400 from the BFF, not the API's bare one (MAIR-560) |
 | `checkApis(probes)`, `checkApisResponseSchema(names)` | `/check_apis` handler (200 / 502) and its contract schema |
 | `securityHeaders`, `apiOnlyHeaders(docsPath)` | helmet setup shared by every BFF; strict headers outside `/docs` |
 | `createRateLimiter(options)`, `sessionKey(req)` | express-rate-limit with the envelope and `<prefix>_*` env; unforgeable per-session key |

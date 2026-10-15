@@ -42,7 +42,8 @@ npm test           # jest, coverage thresholds 90%
   `sessionUserId` / `verifiedSession`, `sessionRole` (the `role` claim Core signs, MAIR-529; `undefined` when missing or empty). Use them for any access decision; `requireBearer` and `unverifiedSubject` only
   check the shape and stay for the transition. Revocation and archived accounts are still checked upstream.
 - `src/config.ts`: `baseUrl`, `assertConfigured` (MAIR-431)
-- `src/validation.ts`: `validationError`, `parseRequest` (MAIR-430)
+- `src/validation.ts`: `validationError`, `parseRequest` (MAIR-430), `textField` (MAIR-560: the APIs' text rules as a
+  zod string, so the BFF names the bad field; an API's 400 body is never relayed)
 - `src/check-apis.ts`: `checkApis`, `checkApisResponseSchema` (MAIR-430)
 - `src/security.ts`: `securityHeaders`, `apiOnlyHeaders`, `createRateLimiter`, `sessionKey` (MAIR-430)
 - `src/telemetry.ts`: `startTelemetry` (MAIR-504): HTTP + Express instrumentations, OTLP export of traces and metrics, off

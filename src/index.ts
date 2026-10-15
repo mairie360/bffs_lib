@@ -38,7 +38,10 @@ export {
   type CallUpstreamOptions,
   type UpstreamRequestOptions,
 } from './upstream';
-export { VALIDATION_FAILED_MESSAGE, validationError, parseRequest, type RequestLocation, type ValidationIssue } from './validation';
+export {
+  VALIDATION_FAILED_MESSAGE, validationError, parseRequest, textField, type RequestLocation, type TextFieldOptions,
+  type ValidationIssue,
+} from './validation';
 export { ReachabilitySchema, checkApisResponseSchema, checkApis, type UpstreamProbes, type CheckApisOptions } from './check-apis';
 export { securityHeaders, apiOnlyHeaders, sessionKey, createRateLimiter, type RateLimiterOptions } from './security';
 export {
