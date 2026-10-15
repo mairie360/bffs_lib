@@ -257,7 +257,8 @@ const { from, to } = parisDateWindow(30);
 | `ErrorResponseSchema`, `ErrorDetailSchema` | zod schemas of the envelope, for the contracts |
 | `HttpError` | throwable with status, code, message, details |
 | `notFoundHandler`, `errorHandler(options?)` | last two middlewares; the status is preserved, unknown errors become a generic 500 |
-| `mapUpstreamError(error, declaredStatuses)` | declared upstream 4xx relayed, undeclared 4xx / 5xx / network errors -> 502 |
+| `mapUpstreamError(error, declaredStatuses)` | declared upstream 4xx relayed, a 429 always relayed with its `Retry-After`, undeclared 4xx / 5xx / network errors -> 502 |
+| `upstreamRetryAfterSeconds(error)` | `Retry-After` of an upstream answer in seconds (delay or HTTP date) |
 | `parisDate`, `addDays`, `parisDateWindow` | `Europe/Paris` calendar helpers |
 | `bearerToken(req)`, `authorization(req)`, `requireBearer` | Bearer token of the request; normalised header or 401; middleware form |
 | `unverifiedSubject(token)` | numeric `sub` read without verifying the signature (never for access decisions) |
@@ -265,7 +266,8 @@ const { from, to } = parisDateWindow(30);
 | `noStore`, `parseTrustProxy(value)` | `Cache-Control: no-store` middleware; `TRUST_PROXY` -> Express `trust proxy` |
 | `asCaller(service, req)`, `withoutSession(service)` | axios-compatible options `{ baseURL, timeout, headers }` of an upstream call |
 | `upstreamError(service, error, declared)`, `callUpstream(service, call, options)` | one mapping of upstream failures: no answer / invalid answer / undeclared status -> 502 |
-| `withRetry(call, options)` | retry on no answer, 502, 503, 504; idempotent calls only |
+| `withRetry(call, options)` | retry on no answer, 502, 503, 504, and on 429 after `Retry-After`; idempotent calls only |
+| `withRateLimitRetry(call, options)` | retry on 429 only, after `Retry-After` (capped by `maxRetryAfterMs`); safe for POST (`callUpstream` option `retryRateLimited`) |
 | `validationError(location, issues)`, `parseRequest(schema, value, location)` | 400 `Validation failed` with `<location>.<path>` details |
 | `textField({ max, min?, multiline?, noMarkup? })` | zod string validated like the Rust APIs (length in code points, blank, control characters, `<>`), so a bad field is a detailed 400 from the BFF, not the API's bare one (MAIR-560) |
 | `checkApis(probes)`, `checkApisResponseSchema(names)` | `/check_apis` handler (200 / 502) and its contract schema |

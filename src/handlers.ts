@@ -25,7 +25,7 @@ export interface ErrorHandlerOptions {
 
 /**
  * Final error handler; mount last. It keeps the status of the error instead of flattening to 400:
- * - `HttpError` -> its own status, code, message and details
+ * - `HttpError` -> its own status, code, message and details (and `Retry-After` when it carries `retryAfterSeconds`)
  * - body-parser / Express errors carrying a 4xx `status` -> that status with a generic message
  * - anything else -> 500, without leaking the message
  */
@@ -39,6 +39,7 @@ export function errorHandler(options: ErrorHandlerOptions = {}): ErrorRequestHan
     if (res.headersSent) return next(error);
     if (error instanceof HttpError) {
       if (error.status >= 500) report(error, req, error.status);
+      if (error.retryAfterSeconds !== undefined) res.setHeader('Retry-After', String(error.retryAfterSeconds));
       return res.status(error.status).json(httpErrorBody(error));
     }
     const status = (error as { status?: unknown } | null)?.status;
