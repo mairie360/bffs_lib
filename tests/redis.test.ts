@@ -37,9 +37,9 @@ describe('createTtlRedis (MAIR-499)', () => {
   it('refuses a missing, zero, fractional or too long TTL', async () => {
     const { exec } = fakeRedis();
     const redis = createTtlRedis(exec, { maxTtlSeconds: 3600 });
-    for (const ttl of [0, -1, 1.5, 3601, Number.NaN]) {
-      await expect(redis.setWithTtl('k', 'v', ttl)).rejects.toThrow(RangeError);
-    }
+    await Promise.all(
+      [0, -1, 1.5, 3601, Number.NaN].map((ttl) => expect(redis.setWithTtl('k', 'v', ttl)).rejects.toThrow(RangeError)),
+    );
     await expect(redis.expire('k', 0)).rejects.toThrow(RangeError);
     // @ts-expect-error: there is no write without a TTL
     expect(redis.set).toBeUndefined();
