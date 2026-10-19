@@ -230,6 +230,23 @@ On a terminal, the same lines are written in the APIs' default `tracing` format,
   space, `=` or a quote is quoted.
 - `createLogger({ format, colors })` overrides both; a logger with a custom `write` writes JSON unless asked otherwise.
 
+## Usage telemetry without identifiers (MAIR-501)
+
+What is used, how much and by how many agents, never who does what:
+
+```ts
+import { USAGE_METRICS_PATH, createUsageLedger, usageMetricsHandler, usageMiddleware } from '@mairie360/bffs-lib';
+
+const usage = createUsageLedger({ service: 'bff-user' });
+app.use(usageMiddleware(usage)); // first, before the routers
+app.get(USAGE_METRICS_PATH, usageMetricsHandler(usage)); // scraped by the instance's collector
+```
+
+Counts per route template (never the path or the query), method, status and period (1 h): actions, distinct
+users, summed latency. Distinct users come from a hash of the user id (verified by `requireSession`) with a salt
+drawn for each period and dropped with the hashes when the period closes. Only closed periods are served, and a
+count under the threshold (5) is not: small operations are summed into `other`, dropped too when under the threshold.
+
 ## Usage
 
 ```ts
