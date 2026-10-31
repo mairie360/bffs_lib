@@ -30,26 +30,49 @@ npm test           # jest, coverage thresholds 90%
 - `src/handlers.ts`: `notFoundHandler`, `errorHandler`
 - `src/describe-error.ts`: `describeError`, `maskValues` (MAIR-290)
 - `src/upstream.ts`: `mapUpstreamError`, `upstreamError`, `callUpstream`, `withRetry`, `asCaller`, `withoutSession` (MAIR-430)
+  - MAIR-562: an upstream 429 is relayed as a 429, declared or not, with its `Retry-After` (`HttpError.retryAfterSeconds`,
+    sent by `errorHandler`). `withRetry` also retries a 429; `withRateLimitRetry` / `callUpstream(…, { retryRateLimited })`
+    retry **only** a 429, so they are safe for POST. Both wait `Retry-After` and give up past `maxRetryAfterMs` (2 s).
 - `src/dates.ts`: Paris date helpers
+- `src/time-zone.ts`: `wallClockToUtc`, `utcToWallClock`, `zonedToday`, `monthBounds` (MAIR-525, moved from BFF_Calendar):
+  wall clock of a time zone (Paris by default) <-> UTC instants of the APIs, DST included
 - `src/auth.ts`: Bearer extraction (`authorization`, `requireBearer`), unverified `sub`, `noStore`, `parseTrustProxy` (MAIR-429)
 - `src/session.ts`: session tokens verified by the BFF (MAIR-474): `verifySessionToken` (HS256 with `JWT_SECRET`, `exp`
   without leeway, positive integer `sub`), `requireSession` (401 before any upstream call, 503 without `JWT_SECRET`),
-  `sessionUserId` / `verifiedSession`. Use them for any access decision; `requireBearer` and `unverifiedSubject` only
+  `sessionUserId` / `verifiedSession`, `sessionRole` (the `role` claim Core signs, MAIR-529; `undefined` when missing or empty). Use them for any access decision; `requireBearer` and `unverifiedSubject` only
   check the shape and stay for the transition. Revocation and archived accounts are still checked upstream.
 - `src/config.ts`: `baseUrl`, `assertConfigured` (MAIR-431)
-- `src/validation.ts`: `validationError`, `parseRequest` (MAIR-430)
+- `src/validation.ts`: `validationError`, `parseRequest` (MAIR-430), `textField` (MAIR-560: the APIs' text rules as a
+  zod string, so the BFF names the bad field; an API's 400 body is never relayed)
 - `src/check-apis.ts`: `checkApis`, `checkApisResponseSchema` (MAIR-430)
 - `src/security.ts`: `securityHeaders`, `apiOnlyHeaders`, `createRateLimiter`, `sessionKey` (MAIR-430)
 - `src/telemetry.ts`: `startTelemetry` (MAIR-504): HTTP + Express instrumentations, OTLP export of traces and metrics, off
   without `OTEL_EXPORTER_OTLP_ENDPOINT`; `RedactingSpanExporter` / `redactSpan` keep only `TELEMETRY_ATTRIBUTES`
+- `src/logger.ts`: `createLogger`, `logger`, `requestLogger`, `requestId` (MAIR-531): JSON lines on stdout
+  (`timestamp`, `level`, `target`, `message`, scalar fields), request log (method, route, status, duration, request id);
+  `errorHandler`, `checkApis` and the OpenTelemetry diagnostics (`diagLogger`) write through it
+  - MAIR-555: `LOG_FORMAT` `json`/`text`; unset = coloured text on a terminal outside `NODE_ENV=test`, JSON otherwise
+    (`FORCE_COLOR` > `NO_COLOR` > TTY for colours). Containers must keep JSON: never make text the default off a TTY.
+- `src/concurrency.ts`: `mapWithConcurrency`, `readOffsetPages` (MAIR-525): bounded parallel calls, pages read in parallel
+- `src/roles.ts`: `roleKey`, `hasRole`, `PROJECT_TASK_MANAGER_ROLES` (MAIR-525): role names compared normalized
+- `src/cache.ts`: `MemoryCache` (TTL, shared in-flight loads, invalidation that drops overtaken loads), `callerKey` (MAIR-525)
+- `src/redis.ts`: `createTtlRedis` (MAIR-499): the BFFs' Redis client, every write with a TTL (`setWithTtl`, 1 s to `maxTtlSeconds`, no plain `set`), prefixed keys, `GET` / `SET … EX [NX]` / `DEL` / `EXPIRE` only; no Redis dependency, it runs on an executor built with `fromIoredis` / `fromNodeRedis` from the BFF's own driver
+- `src/usage.ts`: `createUsageLedger`, `usageMiddleware`, `usageMetricsHandler` (MAIR-501): usage counts per service, route
+  template, method, status and period; distinct users from `sha256(period salt, user id)`, the salt drawn per period and dropped
+  with the hashes at its close; only closed periods and counts at or above the threshold (5) are served on `/internal/usage`
+  (Prometheus text) for the instance's collector; no id, hash or salt is ever exported
 - `src/index.ts`: the public API; anything not exported here is private
 
 ## Rules
 
+- Redis goes through `createTtlRedis` only: a key without TTL would keep its personal data forever (MAIR-499, Semgrep `gdpr-ts-redis-write-without-ttl` in CICD).
 - Never forward upstream messages or bodies to clients, and never leak the message of an unexpected error.
 - Never log an error as is (MAIR-290): an `HttpError` from `upstreamError` / `callUpstream` keeps the axios error as `cause`, whose `config.headers` hold the caller's Bearer token and `config.data` / `response.data` the request and response bodies. Log `describeError(error)` (name, status, code, method and path of the call, masked message, cause chain, stack frames); `errorHandler` and `checkApis` do by default, a custom `onError` still receives the original error. The CICD's log marker test (`gdpr_marker` job) searches every container's logs for a marker user's values.
+- Logs go through `createLogger` / `logger` (MAIR-531), never `console.*`: one line per event (JSON, or text on a terminal), scalar fields only.
 - Telemetry must never export personal data (MAIR-290, MAIR-501): a new span or metric attribute goes through
   `TELEMETRY_ATTRIBUTES` and only if it cannot hold a request value (URL, query, body, header, id, IP).
+- A BFF calls APIs, never another BFF (MAIR-525); independent calls go in parallel, `no-await-in-loop` is an error and
+  each exception says why in a comment. Cached answers are keyed by caller (`callerKey`).
 - A BFF must not answer a status its contract does not declare.
 - The only accepted credential is `Authorization: Bearer <token>`; do not add cookie or custom-header fallbacks.
 - Upstream URLs are `<SERVICE>_URL` (+ `_PORT`), read per call; never a `localhost` default, never read at import time.

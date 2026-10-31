@@ -28,6 +28,18 @@ export interface VerifiedSession {
   userId: number;
   /** Expiry of the token, in seconds since the epoch. */
   expiresAt: number;
+  /**
+   * Name of the caller's role, from the `role` claim Core signs (MAIR-529), or `undefined` when the claim is
+   * missing or empty (a token issued before it, or a user with no role): the BFF then reads it from Core API.
+   */
+  role?: string;
+}
+
+/** The `role` claim when it is a non-blank string, trimmed; `undefined` otherwise. */
+function roleClaim(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const role = value.trim();
+  return role === '' ? undefined : role;
 }
 
 function decodePart(part: string): Record<string, unknown> {
@@ -63,7 +75,8 @@ export function verifySessionToken(
     if (typeof exp !== 'number' || !Number.isFinite(exp) || exp <= nowSeconds) throw new Error('expired');
     const userId = typeof sub === 'string' && /^\d+$/.test(sub) ? Number(sub) : sub;
     if (typeof userId !== 'number' || !Number.isSafeInteger(userId) || userId <= 0) throw new Error('bad sub');
-    return { userId, expiresAt: exp };
+    const role = roleClaim(payload.role);
+    return role === undefined ? { userId, expiresAt: exp } : { userId, expiresAt: exp, role };
   } catch {
     // Never send the parsing detail (base64, JSON, which check failed) to the client.
     throw new HttpError(401, INVALID_TOKEN_MESSAGE);
@@ -103,4 +116,15 @@ export function sessionUserId(req: Request): number {
   const session = sessions.get(req);
   if (session === undefined) throw new HttpError(401, INVALID_SESSION_MESSAGE);
   return session.userId;
+}
+
+/**
+ * The caller's role from the verified token (`role` claim), or `undefined` when the token carries none and the
+ * role must be read from Core API (`GET /api/v1/user/me/`), never from another BFF (MAIR-525). Throws a 401 when
+ * the request did not go through `requireSession`.
+ */
+export function sessionRole(req: Request): string | undefined {
+  const session = sessions.get(req);
+  if (session === undefined) throw new HttpError(401, INVALID_SESSION_MESSAGE);
+  return session.role;
 }

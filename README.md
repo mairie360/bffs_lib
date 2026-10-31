@@ -1,6 +1,6 @@
 # bffs_lib
 
-`@mairie360/bffs-lib`: shared building blocks of the Mairie 360 BFFs (MAIR-234, MAIR-429, MAIR-430, MAIR-431, MAIR-504).
+`@mairie360/bffs-lib`: shared building blocks of the Mairie 360 BFFs (MAIR-234, MAIR-429, MAIR-430, MAIR-431, MAIR-504, MAIR-531).
 A BFF must use these instead of keeping its own copy.
 
 ## Error envelope
@@ -31,6 +31,24 @@ await api.getProjects({ headers: { Authorization: authorization(req) } });
 // unverified `sub`: only to shape a request sent upstream with the same token, never to grant access
 const userId = unverifiedSubject(authorization(req));
 ```
+
+### Caller's role (MAIR-529)
+
+Core signs the user's role in the `role` claim of the session JWT (login and refresh). Behind
+`requireSession`, read it from the verified token instead of calling BFF User `/me`:
+
+```ts
+import { requireSession, sessionRole, hasRole } from '@mairie360/bffs-lib';
+
+app.get('/admin-link', requireSession, async (req, res) => {
+  // `undefined` when the claim is missing or empty (a token issued before it, or a user with no role):
+  // read the role from Core API GET /api/v1/user/me/.
+  const role = sessionRole(req) ?? (await readRoleFromCore(req));
+  res.json({ isAdmin: role !== undefined && hasRole([role], 'admin') });
+});
+```
+
+A role granted or removed shows in the token at its next refresh only.
 
 ## Upstream configuration (MAIR-431)
 
@@ -81,6 +99,48 @@ Never key a rate limit on a `sub` decoded without verification: use `sessionKey`
 For a limit that must hold whatever the caller's IP (failed sign-ins per account, per refresh token), pass
 `perIp: false` with `keyOf`.
 
+## No calls between BFFs, parallel calls, cache (MAIR-525)
+
+A BFF calls the APIs, never another BFF, unless it reuses non-trivial business logic no API has (say why in
+the code and the PR). The caller's role comes from the verified token, not from BFF User `/me`:
+
+```ts
+import { requireSession, sessionRole } from '@mairie360/bffs-lib';
+
+// `role` claim signed by Core (MAIR-529); `undefined` when missing or empty:
+// then read it from Core API GET /api/v1/user/me/ (an API, not BFF User).
+const role = sessionRole(req) ?? (await readRoleFromCore(req));
+```
+
+Independent calls start together; lists are read with a bound on the calls in flight:
+
+```ts
+import { mapWithConcurrency, readOffsetPages } from '@mairie360/bffs-lib';
+
+const [projects, events] = await Promise.all([listProjects(req), listEvents(req)]);
+const details = await mapWithConcurrency(ids, 5, (id) => getDetail(req, id));
+// first page, then the others in parallel once the total is known
+const pages = await readOffsetPages({
+  fetchPage: (offset) => api.list({ limit: 500, offset }, options).then((r) => r.data),
+  served: (page) => page.items.length,
+  total: (page) => page.total,
+});
+```
+
+ESLint `no-await-in-loop` is on in the lib and every BFF: a loop that must stay sequential (retries, cursor
+pages) disables it on that line with a comment saying why.
+
+Stable reads (directory, assignable users) can be kept a short time in memory. Key them by caller and clear the
+cache on every write of the BFF; other replicas see the change once the TTL ends:
+
+```ts
+import { MemoryCache, callerKey, sessionUserId } from '@mairie360/bffs-lib';
+
+const directory = new MemoryCache<User[]>({ ttlMs: 30_000 });
+const users = await directory.getOrLoad(callerKey(sessionUserId(req), 'directory'), () => readDirectory(req));
+directory.clear(); // after a write
+```
+
 ## Telemetry (MAIR-504)
 
 OpenTelemetry traces and metrics, exported over OTLP (http/protobuf) to the collector of the instance. Off
@@ -116,6 +176,77 @@ import app from './app';
 | `OTEL_SERVICE_NAME` | overrides `serviceName` |
 | `OTEL_RESOURCE_ATTRIBUTES` | extra resource attributes, e.g. `deployment.environment.name=prod` |
 
+## Structured logs (MAIR-531)
+
+Every BFF logs through the lib: one JSON object per line on stdout, the shape the APIs print with
+`LOG_FORMAT=json` (flattened), so one collector query reads both.
+
+```json
+{"timestamp":"2026-10-13T08:30:00.000Z","level":"INFO","target":"bff-user","message":"request completed","request_id":"7f1c…","method":"GET","path":"/admin/users/:userId","status":200,"duration_ms":12.4}
+```
+
+```ts
+// src/logger.ts
+import { createLogger } from '@mairie360/bffs-lib';
+export const logger = createLogger({ target: 'bff-user' });
+
+// src/app.ts: first middleware, and the same logger for the final handlers
+app.use(requestLogger({ logger }));
+app.get('/check_apis', checkApis({ core_api: probe }, { logger }));
+app.use(notFoundHandler);
+app.use(errorHandler({ logger }));
+
+// anywhere else, instead of console.*
+logger.warn('session revocation failed on logout', { request_id: requestId(req), status });
+logger.error('rollback failed', { request_id: requestId(req), error: describeError(error) });
+```
+
+- `requestLogger` gives every request an id (`X-Request-Id`, kept from the caller when it is 8-128 characters of
+  `[A-Za-z0-9_.-]`, else a UUID; answered in the same header, read with `requestId(req)`) and writes one line when
+  it ends: `method`, `path` (the matched route; an unmatched path has its ids masked by `urlTemplate`), `status`,
+  `duration_ms`. 5xx at `error`, a request the client abandoned (an SSE stream it closed included) at `info` with `aborted: true`, the rest at `info`.
+  `/health` is not logged.
+- `errorHandler` writes `request failed` (`request_id`, `status`, `error` = `describeError(error)`) for every 5xx,
+  `checkApis` writes `upstream unreachable` (`upstream`, `error`) per failed probe, `startTelemetry` routes the
+  OpenTelemetry diagnostics through `diagLogger`.
+- `trace_id` / `span_id` are added when a span is active (telemetry on).
+- Fields are scalars only: a header, a body or an error object cannot be passed as is. Log errors through
+  `describeError` (MAIR-290); never log an e-mail, a token, a query string or a request body.
+- `LOG_LEVEL` (`debug`, `info`, `warn`, `error`; default `info`) is read on every line.
+
+### Readable logs on a terminal (MAIR-555)
+
+On a terminal, the same lines are written in the APIs' default `tracing` format, coloured by level:
+
+```text
+2026-10-13T08:30:00.000Z  INFO bff-user: request completed method=GET path=/admin/users/:userId status=200
+```
+
+- `LOG_FORMAT` (`json` or `text`, read on every line) chooses the format. Unset: `text` when stdout is a terminal
+  and `NODE_ENV` is not `test`, else `json`. Containers, Kubernetes and the tests therefore keep JSON with no setting.
+- Colours (text only): `FORCE_COLOR` set (not `0` / `false`) forces them, else `NO_COLOR` turns them off, else
+  they follow the terminal.
+- A text line stays on one line: control characters of the message and values are escaped, and a value holding a
+  space, `=` or a quote is quoted.
+- `createLogger({ format, colors })` overrides both; a logger with a custom `write` writes JSON unless asked otherwise.
+
+## Usage telemetry without identifiers (MAIR-501)
+
+What is used, how much and by how many agents, never who does what:
+
+```ts
+import { USAGE_METRICS_PATH, createUsageLedger, usageMetricsHandler, usageMiddleware } from '@mairie360/bffs-lib';
+
+const usage = createUsageLedger({ service: 'bff-user' });
+app.use(usageMiddleware(usage)); // first, before the routers
+app.get(USAGE_METRICS_PATH, usageMetricsHandler(usage)); // scraped by the instance's collector
+```
+
+Counts per route template (never the path or the query), method, status and period (1 h): actions, distinct
+users, summed latency. Distinct users come from a hash of the user id (verified by `requireSession`) with a salt
+drawn for each period and dropped with the hashes when the period closes. Only closed periods are served, and a
+count under the threshold (5) is not: small operations are summed into `other`, dropped too when under the threshold.
+
 ## Usage
 
 ```ts
@@ -143,7 +274,8 @@ const { from, to } = parisDateWindow(30);
 | `ErrorResponseSchema`, `ErrorDetailSchema` | zod schemas of the envelope, for the contracts |
 | `HttpError` | throwable with status, code, message, details |
 | `notFoundHandler`, `errorHandler(options?)` | last two middlewares; the status is preserved, unknown errors become a generic 500 |
-| `mapUpstreamError(error, declaredStatuses)` | declared upstream 4xx relayed, undeclared 4xx / 5xx / network errors -> 502 |
+| `mapUpstreamError(error, declaredStatuses)` | declared upstream 4xx relayed, a 429 always relayed with its `Retry-After`, undeclared 4xx / 5xx / network errors -> 502 |
+| `upstreamRetryAfterSeconds(error)` | `Retry-After` of an upstream answer in seconds (delay or HTTP date) |
 | `parisDate`, `addDays`, `parisDateWindow` | `Europe/Paris` calendar helpers |
 | `bearerToken(req)`, `authorization(req)`, `requireBearer` | Bearer token of the request; normalised header or 401; middleware form |
 | `unverifiedSubject(token)` | numeric `sub` read without verifying the signature (never for access decisions) |
@@ -151,11 +283,14 @@ const { from, to } = parisDateWindow(30);
 | `noStore`, `parseTrustProxy(value)` | `Cache-Control: no-store` middleware; `TRUST_PROXY` -> Express `trust proxy` |
 | `asCaller(service, req)`, `withoutSession(service)` | axios-compatible options `{ baseURL, timeout, headers }` of an upstream call |
 | `upstreamError(service, error, declared)`, `callUpstream(service, call, options)` | one mapping of upstream failures: no answer / invalid answer / undeclared status -> 502 |
-| `withRetry(call, options)` | retry on no answer, 502, 503, 504; idempotent calls only |
+| `withRetry(call, options)` | retry on no answer, 502, 503, 504, and on 429 after `Retry-After`; idempotent calls only |
+| `withRateLimitRetry(call, options)` | retry on 429 only, after `Retry-After` (capped by `maxRetryAfterMs`); safe for POST (`callUpstream` option `retryRateLimited`) |
 | `validationError(location, issues)`, `parseRequest(schema, value, location)` | 400 `Validation failed` with `<location>.<path>` details |
+| `textField({ max, min?, multiline?, noMarkup? })` | zod string validated like the Rust APIs (length in code points, blank, control characters, `<>`), so a bad field is a detailed 400 from the BFF, not the API's bare one (MAIR-560) |
 | `checkApis(probes)`, `checkApisResponseSchema(names)` | `/check_apis` handler (200 / 502) and its contract schema |
 | `securityHeaders`, `apiOnlyHeaders(docsPath)` | helmet setup shared by every BFF; strict headers outside `/docs` |
 | `createRateLimiter(options)`, `sessionKey(req)` | express-rate-limit with the envelope and `<prefix>_*` env; unforgeable per-session key |
+| `createLogger(options)`, `logger`, `requestLogger(options)`, `requestId(req)` | JSON logs, one line per event; request log with id, route, status, duration (MAIR-531) |
 | `startTelemetry(options)`, `telemetryEnabled()` | OpenTelemetry for a BFF, off without `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | `redactSpan`, `RedactingSpanExporter`, `urlTemplate`, `TELEMETRY_ATTRIBUTES` | attribute allowlist applied to every exported span |
 

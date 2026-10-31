@@ -1,5 +1,5 @@
 import type { IncomingMessage } from 'node:http';
-import { DiagConsoleLogger, DiagLogLevel, diag, type Attributes, type Link } from '@opentelemetry/api';
+import { DiagLogLevel, diag, type Attributes, type DiagLogger, type Link } from '@opentelemetry/api';
 import type { ExportResult } from '@opentelemetry/core';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
@@ -10,6 +10,8 @@ import { defaultResource, detectResources, envDetector, resourceFromAttributes }
 import { MeterProvider, PeriodicExportingMetricReader, createAllowListAttributesProcessor } from '@opentelemetry/sdk-metrics';
 import { BatchSpanProcessor, NodeTracerProvider, type ReadableSpan, type SpanExporter } from '@opentelemetry/sdk-trace-node';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
+import { maskValues } from './describe-error';
+import { logger } from './logger';
 
 /**
  * The only span and metric attributes exported (MAIR-504, MAIR-290, MAIR-501): method, status, parameterised
@@ -157,9 +159,21 @@ function untraced(paths: readonly string[]): (request: IncomingMessage) => boole
  * `OTEL_SERVICE_NAME` and `OTEL_RESOURCE_ATTRIBUTES` (e.g. `deployment.environment.name=prod`) override
  * the resource.
  */
+/**
+ * The OpenTelemetry diagnostics (export failures) as JSON lines of the lib's logger (MAIR-531): the message only,
+ * masked, never the arguments (an exporter error can carry the request it failed to send).
+ */
+export const diagLogger: DiagLogger = {
+  error: (message) => logger.error(maskValues(message), { source: 'opentelemetry' }),
+  warn: (message) => logger.warn(maskValues(message), { source: 'opentelemetry' }),
+  info: (message) => logger.info(maskValues(message), { source: 'opentelemetry' }),
+  debug: (message) => logger.debug(maskValues(message), { source: 'opentelemetry' }),
+  verbose: (message) => logger.debug(maskValues(message), { source: 'opentelemetry' }),
+};
+
 export function startTelemetry(options: TelemetryOptions): Telemetry | undefined {
   if (!telemetryEnabled()) return undefined;
-  diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.ERROR);
+  diag.setLogger(diagLogger, DiagLogLevel.ERROR);
 
   const resource = defaultResource()
     .merge(
@@ -210,6 +224,6 @@ export function startTelemetry(options: TelemetryOptions): Telemetry | undefined
     }
   }
 
-  console.log(`Telemetry enabled for ${options.serviceName}`);
+  logger.info('telemetry enabled', { service: options.serviceName });
   return telemetry;
 }

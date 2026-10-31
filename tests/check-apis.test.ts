@@ -1,6 +1,7 @@
 import express from 'express';
 import request from 'supertest';
 import { baseUrl, checkApis, checkApisResponseSchema } from '../src';
+import { captureLogs } from './support/capture-logs';
 
 function buildApp(probes: Parameters<typeof checkApis>[0], onUnreachable = jest.fn()) {
   const app = express();
@@ -33,14 +34,16 @@ describe('checkApis', () => {
     expect(onUnreachable).toHaveBeenCalledWith('user_bff', expect.objectContaining({ status: 503 }));
   });
 
-  it('logs a warning by default', async () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  it('writes a JSON warning per unreachable upstream by default', async () => {
+    const logs = captureLogs();
     const app = express();
     app.get('/check_apis', checkApis({ core_api: () => Promise.reject(new Error('down')), other: () => Promise.reject('nope') }));
     await request(app).get('/check_apis');
-    expect(warn).toHaveBeenCalledWith('[check_apis] core_api unreachable: Error: down');
-    expect(warn).toHaveBeenCalledWith('[check_apis] other unreachable: nope');
-    warn.mockRestore();
+    jest.restoreAllMocks();
+    expect(logs).toEqual([
+      expect.objectContaining({ level: 'WARN', message: 'upstream unreachable', upstream: 'core_api', error: 'Error: down' }),
+      expect.objectContaining({ level: 'WARN', message: 'upstream unreachable', upstream: 'other', error: 'nope' }),
+    ]);
   });
 
   it('rejects an answer with an unknown state', () => {

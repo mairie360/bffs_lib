@@ -117,9 +117,9 @@ describe('createRateLimiter', () => {
     process.env.RATE_LIMIT_ENABLED = 'FALSE';
     const fromEnv = limitedApp(createRateLimiter({ limit: 1 }));
     const fromOption = limitedApp(createRateLimiter({ limit: 1, enabled: false }));
-    for (const app of [fromEnv, fromOption]) {
+    await Promise.all([fromEnv, fromOption].map(async (app) => {
       await request(app).post('/login');
       expect((await request(app).post('/login')).status).toBe(401);
-    }
+    }));
   });
 });
