@@ -70,7 +70,7 @@ await coreApi.getMe({ baseURL: baseUrl('CORE_API') });
 
 ```ts
 import {
-  asCaller, withoutSession, callUpstream, parseRequest, checkApis, checkApisResponseSchema,
+  asCaller, withoutSession, asAnonymousClient, callUpstream, parseRequest, checkApis, checkApisResponseSchema,
   securityHeaders, apiOnlyHeaders, createRateLimiter, sessionKey, parseTrustProxy,
 } from '@mairie360/bffs-lib';
 
@@ -282,6 +282,7 @@ const { from, to } = parisDateWindow(30);
 | `baseUrl(service)`, `assertConfigured(services)` | `<SERVICE>_URL`/`_PORT` read per call, 503 when missing or invalid; startup check |
 | `noStore`, `parseTrustProxy(value)` | `Cache-Control: no-store` middleware; `TRUST_PROXY` -> Express `trust proxy` |
 | `asCaller(service, req)`, `withoutSession(service)` | axios-compatible options `{ baseURL, timeout, headers }` of an upstream call |
+| `asAnonymousClient(service, req)`, `clientIp(req)` | options of an anonymous call (sign-in, password recovery, refresh) relaying the client address (`req.ip`, behind `trust proxy`) as `X-Forwarded-For`, so the API rate-limits the client and not the BFF pod (MAIR-679) |
 | `upstreamError(service, error, declared)`, `callUpstream(service, call, options)` | one mapping of upstream failures: no answer / invalid answer / undeclared status -> 502 |
 | `withRetry(call, options)` | retry on no answer, 502, 503, 504, and on 429 after `Retry-After`; idempotent calls only |
 | `withRateLimitRetry(call, options)` | retry on 429 only, after `Retry-After` (capped by `maxRetryAfterMs`); safe for POST (`callUpstream` option `retryRateLimited`) |
