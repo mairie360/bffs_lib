@@ -18,12 +18,17 @@ export {
 export {
   INVALID_TOKEN_MESSAGE,
   SESSION_NOT_CONFIGURED_MESSAGE,
+  SESSION_JWT_ISSUER,
+  SESSION_JWT_AUDIENCE,
+  parseSessionPublicKeys,
+  sessionKeysFromEnv,
   verifySessionToken,
   requireSession,
   verifiedSession,
   sessionUserId,
   sessionRole,
   type VerifiedSession,
+  type SessionKeys,
 } from './session';
 export { baseUrl, assertConfigured } from './config';
 export {

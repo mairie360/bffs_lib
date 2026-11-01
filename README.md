@@ -32,6 +32,21 @@ await api.getProjects({ headers: { Authorization: authorization(req) } });
 const userId = unverifiedSubject(authorization(req));
 ```
 
+### Session keys (MAIR-680)
+
+`requireSession` verifies the session JWT Core signed before any upstream call. Only Core can sign: it uses an
+Ed25519 private key (`alg` EdDSA, `kid` = RFC 7638 thumbprint, `iss` `mairie360-core`, `aud` `mairie360`), and a BFF
+holds nothing but the public key:
+
+| Variable | Content |
+| --- | --- |
+| `JWT_PUBLIC_KEY` | Core's Ed25519 public key in PEM (`openssl pkey -pubout`); several `PUBLIC KEY` blocks during a key rotation; `\n`-escaped line breaks accepted |
+| `JWT_SECRET` | Transition only: while it is set, the historical HS256 tokens are still accepted. Remove it once Core signs with its key: those tokens are then refused (401) |
+
+Without either variable (or with a malformed `JWT_PUBLIC_KEY`), `requireSession` answers 503. `sessionKeysFromEnv()`
+returns the parsed keys (it throws on a malformed key): call it at startup to fail fast instead of checking
+`JWT_SECRET`.
+
 ### Caller's role (MAIR-529)
 
 Core signs the user's role in the `role` claim of the session JWT (login and refresh). Behind
