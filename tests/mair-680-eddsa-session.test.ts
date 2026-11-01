@@ -1,4 +1,4 @@
-import { createHash, createHmac, createPrivateKey, sign as edSign } from 'node:crypto';
+import { createHash, createHmac, createPrivateKey, generateKeyPairSync, sign as edSign } from 'node:crypto';
 import express from 'express';
 import request from 'supertest';
 import {
@@ -82,6 +82,15 @@ describe('MAIR-680 Ed25519 session tokens', () => {
     expect(verifySessionToken(signEd(claims()), transition, NOW).userId).toBe(2);
   });
 
+  it.each(['', '   '])('never verifies HS256 with a blank secret (%j)', (blank) => {
+    const forged = signHs({ sub: '1', role: 'Admin', exp: NOW + 3600 }, blank);
+    expect(() => verifySessionToken(forged, { ...publicOnly, secret: blank }, NOW)).toThrow(
+      expect.objectContaining({ status: 401 }),
+    );
+    expect(sessionKeysFromEnv({ JWT_PUBLIC_KEY: CORE_PUBLIC_KEY, JWT_SECRET: blank })?.secret).toBeUndefined();
+    expect(sessionKeysFromEnv({ JWT_SECRET: blank })).toBeUndefined();
+  });
+
   it('accepts every published key during a rotation', () => {
     const both: SessionKeys = { publicKeys: parseSessionPublicKeys(`${OTHER_PUBLIC_KEY}${CORE_PUBLIC_KEY}`) };
     const next = signEd(claims(), { privatePem: OTHER_PRIVATE_KEY, header: { alg: 'EdDSA', kid: kidOf(OTHER_PUBLIC_KEY) } });
@@ -101,6 +110,9 @@ describe('MAIR-680 Ed25519 session tokens', () => {
     expect(kidOf(CORE_PUBLIC_KEY.replace(/\n/g, '\\n'))).toBe(CORE_KID);
     expect(() => parseSessionPublicKeys('not a key')).toThrow();
     expect(() => parseSessionPublicKeys(CORE_PRIVATE_KEY)).toThrow();
+    // A valid public key of another type (ES256 here) is not Core's Ed25519 key.
+    const { publicKey: ecKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    expect(() => parseSessionPublicKeys(ecKey.export({ type: 'spki', format: 'pem' }).toString())).toThrow(/not Ed25519/);
   });
 
   it('reads the keys from the environment', () => {

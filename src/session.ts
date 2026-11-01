@@ -94,7 +94,8 @@ let cachedKeys: { publicPem: string; secret: string; keys: SessionKeys } | undef
  */
 export function sessionKeysFromEnv(env: NodeJS.ProcessEnv = process.env): SessionKeys | undefined {
   const publicPem = env.JWT_PUBLIC_KEY?.trim() ?? '';
-  const secret = env.JWT_SECRET ?? '';
+  // A blank secret is no secret: it must never become an HMAC key anybody can sign with.
+  const secret = env.JWT_SECRET?.trim() ? env.JWT_SECRET : '';
   if (publicPem === '' && secret === '') return undefined;
   if (cachedKeys?.publicPem !== publicPem || cachedKeys.secret !== secret) {
     const keys: SessionKeys = {
@@ -114,7 +115,7 @@ function checkSignature(header: Record<string, unknown>, unsigned: string, signa
     if (!verify(null, Buffer.from(unsigned), key, received)) throw new Error('bad signature');
     return;
   }
-  if (header.alg === 'HS256' && keys.secret) {
+  if (header.alg === 'HS256' && keys.secret?.trim()) {
     const expected = createHmac('sha256', Buffer.from(keys.secret, 'utf8')).update(unsigned).digest();
     if (received.length !== expected.length || !timingSafeEqual(received, expected)) throw new Error('bad signature');
     return;
