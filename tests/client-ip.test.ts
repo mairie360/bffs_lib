@@ -57,6 +57,11 @@ describe('MAIR-679 client address relayed to the APIs', () => {
     expect(response.body[CLIENT_IP_HEADER]).toMatch(/^(127\.0\.0\.1|::1)$/);
   });
 
+  it('relays nothing when every hop is trusted, since the client wrote the leftmost entry', async () => {
+    const response = await request(bff('true')).get('/relay').set('X-Forwarded-For', '1.2.3.4, 198.51.100.9');
+    expect(response.body).toEqual({});
+  });
+
   it('gives two clients behind the same front two different relayed addresses', async () => {
     const app = bff('loopback');
     const a = await request(app).get('/relay').set('X-Forwarded-For', '198.51.100.1');

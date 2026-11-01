@@ -239,10 +239,14 @@ export function clientIp(req: Pick<Request, 'ip' | 'socket'>): string | undefine
  */
 export function asAnonymousClient(
   service: string,
-  req: Pick<Request, 'ip' | 'socket'>,
+  req: Pick<Request, 'ip' | 'socket'> & { app?: Pick<Request['app'], 'get'> },
   timeout = UPSTREAM_TIMEOUT_MS,
 ): UpstreamRequestOptions {
   const options = withoutSession(service, timeout);
+  // `trust proxy` = true (`TRUST_PROXY=true`) trusts every hop: `req.ip` is then the leftmost X-Forwarded-For entry,
+  // which the client wrote. Relaying it would let the client pick the address the API rate-limits, so nothing is sent
+  // and the API counts this BFF, as before MAIR-679. List the trusted proxies instead (`loopback, 10.42.0.0/16`).
+  if (req.app?.get('trust proxy') === true) return options;
   const ip = clientIp(req);
   return ip ? { ...options, headers: { [CLIENT_IP_HEADER]: ip } } : options;
 }
