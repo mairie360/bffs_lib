@@ -40,8 +40,12 @@ npm test           # jest, coverage thresholds 90%
 - `src/time-zone.ts`: `wallClockToUtc`, `utcToWallClock`, `zonedToday`, `monthBounds` (MAIR-525, moved from BFF_Calendar):
   wall clock of a time zone (Paris by default) <-> UTC instants of the APIs, DST included
 - `src/auth.ts`: Bearer extraction (`authorization`, `requireBearer`), unverified `sub`, `noStore`, `parseTrustProxy` (MAIR-429)
-- `src/session.ts`: session tokens verified by the BFF (MAIR-474): `verifySessionToken` (HS256 with `JWT_SECRET`, `exp`
-  without leeway, positive integer `sub`), `requireSession` (401 before any upstream call, 503 without `JWT_SECRET`),
+- `src/session.ts`: session tokens verified by the BFF (MAIR-474): `verifySessionToken` (EdDSA with Core's public key of
+  `JWT_PUBLIC_KEY` picked by `kid`, `iss` `mairie360-core` and `aud` `mairie360` checked (MAIR-680); HS256 with
+  `JWT_SECRET` only while that variable is set (transition); `exp` without leeway, positive integer `sub`),
+  `sessionKeysFromEnv` / `parseSessionPublicKeys` (keys by RFC 7638 thumbprint, same `kid` as `mairie360_api_lib`),
+  `requireSession` (401 before any upstream call, 503 without `JWT_PUBLIC_KEY` nor `JWT_SECRET` or with a malformed
+  `JWT_PUBLIC_KEY`; a blank `JWT_SECRET` counts as unset),
   `sessionUserId` / `verifiedSession`, `sessionRole` (the `role` claim Core signs, MAIR-529; `undefined` when missing or empty). Use them for any access decision; `requireBearer` and `unverifiedSubject` only
   check the shape and stay for the transition. Revocation and archived accounts are still checked upstream.
 - `src/config.ts`: `baseUrl`, `assertConfigured` (MAIR-431)
