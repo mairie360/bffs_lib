@@ -33,6 +33,9 @@ npm test           # jest, coverage thresholds 90%
   - MAIR-562: an upstream 429 is relayed as a 429, declared or not, with its `Retry-After` (`HttpError.retryAfterSeconds`,
     sent by `errorHandler`). `withRetry` also retries a 429; `withRateLimitRetry` / `callUpstream(…, { retryRateLimited })`
     retry **only** a 429, so they are safe for POST. Both wait `Retry-After` and give up past `maxRetryAfterMs` (2 s).
+  - MAIR-679: `asAnonymousClient(service, req)` = `withoutSession` + `X-Forwarded-For: clientIp(req)`. Use it for every
+    anonymous call made for a browser (Core_API trusts the header from in-cluster peers and rate-limits on it). It sends
+    `req.ip` alone, never the incoming chain, so the BFF's `TRUST_PROXY` decides what a client can forge.
 - `src/dates.ts`: Paris date helpers
 - `src/time-zone.ts`: `wallClockToUtc`, `utcToWallClock`, `zonedToday`, `monthBounds` (MAIR-525, moved from BFF_Calendar):
   wall clock of a time zone (Paris by default) <-> UTC instants of the APIs, DST included

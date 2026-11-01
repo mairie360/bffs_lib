@@ -215,3 +215,38 @@ export function asCaller(service: string, req: Pick<Request, 'headers'>, timeout
 export function withoutSession(service: string, timeout = UPSTREAM_TIMEOUT_MS): UpstreamRequestOptions {
   return { baseURL: baseUrl(service), timeout };
 }
+
+/** Header relaying the client address to the APIs (MAIR-679). */
+export const CLIENT_IP_HEADER = 'X-Forwarded-For';
+
+/**
+ * Address of the client that sent `req`, as Express resolved it: `req.ip`, which only reads `X-Forwarded-For` through
+ * the proxies trusted by `trust proxy` (see `parseTrustProxy`), else the socket peer. An IPv4-mapped IPv6 address
+ * (`::ffff:203.0.113.7`) is given in its IPv4 form. `undefined` when neither is known.
+ */
+export function clientIp(req: Pick<Request, 'ip' | 'socket'>): string | undefined {
+  const raw = req.ip ?? req.socket?.remoteAddress;
+  if (!raw) return undefined;
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(raw);
+  return mapped ? mapped[1] : raw;
+}
+
+/**
+ * Options of a call to `service` without a session, made on behalf of the anonymous client of `req` (sign-in, password
+ * recovery, refresh): the client address is sent as `X-Forwarded-For` so the API rate-limits and audits the client,
+ * not the BFF pod shared by every user (MAIR-679). The header holds `clientIp(req)` alone, never the chain the client
+ * sent: a forged `X-Forwarded-For` only reaches the API through `trust proxy`, which already discarded it.
+ */
+export function asAnonymousClient(
+  service: string,
+  req: Pick<Request, 'ip' | 'socket'> & { app?: Pick<Request['app'], 'get'> },
+  timeout = UPSTREAM_TIMEOUT_MS,
+): UpstreamRequestOptions {
+  const options = withoutSession(service, timeout);
+  // `trust proxy` = true (`TRUST_PROXY=true`) trusts every hop: `req.ip` is then the leftmost X-Forwarded-For entry,
+  // which the client wrote. Relaying it would let the client pick the address the API rate-limits, so nothing is sent
+  // and the API counts this BFF, as before MAIR-679. List the trusted proxies instead (`loopback, 10.42.0.0/16`).
+  if (req.app?.get('trust proxy') === true) return options;
+  const ip = clientIp(req);
+  return ip ? { ...options, headers: { [CLIENT_IP_HEADER]: ip } } : options;
+}
