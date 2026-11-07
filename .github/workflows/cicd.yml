@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   CICD:
-    uses: mairie360/CICD/.github/workflows/bffs-lib-cicd.yml@v5.2.2
+    uses: mairie360/CICD/.github/workflows/bffs-lib-cicd.yml@v5.5.0
     with:
       cicd_version: v5.2.2
     secrets:
