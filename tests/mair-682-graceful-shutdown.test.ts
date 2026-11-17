@@ -14,6 +14,11 @@ function startServer(): Promise<{ server: Server; url: string; release: () => vo
     await released;
     res.json({ done: true });
   });
+  app.get('/chunked', async (_req, res) => {
+    res.write('start ');
+    await released;
+    res.end('end');
+  });
   app.get('/stream', (_req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.flushHeaders();
@@ -160,5 +165,40 @@ describe('MAIR-682 gracefulShutdown', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(exit).toHaveBeenCalledTimes(1);
     expect(exit).toHaveBeenCalledWith(0);
+  });
+  it('ends a keep-alive connection once a response that already sent its head finishes', async () => {
+    const started = await startServer();
+    server = started.server;
+    handle = gracefulShutdown(server, { signals: [] });
+    const agent = new http.Agent({ keepAlive: true });
+
+    const chunked = get(`${started.url}/chunked`, agent);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const done = handle.shutdown('test');
+    started.release();
+    await expect(chunked).resolves.toMatchObject({ status: 200, body: 'start end' });
+    const startedAt = Date.now();
+    await expect(done).resolves.toBe(0);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    agent.destroy();
+  });
+
+  it('exits the process with the drain result by default', async () => {
+    const started = await startServer();
+    server = started.server;
+    const handlers = new Map<string, () => void>();
+    const once = jest.spyOn(process, 'once').mockImplementation(((signal: string, handler: () => void) => {
+      handlers.set(signal, handler);
+      return process;
+    }) as typeof process.once);
+    const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    handle = gracefulShutdown(server, { signals: ['SIGTERM'] });
+    once.mockRestore();
+
+    handlers.get('SIGTERM')?.();
+    await handle.shutdown();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(exit).toHaveBeenCalledWith(0);
+    exit.mockRestore();
   });
 });
