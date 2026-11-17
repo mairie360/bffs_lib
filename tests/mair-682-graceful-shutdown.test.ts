@@ -1,4 +1,5 @@
 import http, { type Server } from 'node:http';
+import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
 import { gracefulShutdown, type GracefulShutdown } from '../src';
@@ -200,5 +201,29 @@ describe('MAIR-682 gracefulShutdown', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(exit).toHaveBeenCalledWith(0);
     exit.mockRestore();
+  });
+  it('answers a request that reaches the server during the drain with Connection: close', async () => {
+    const started = await startServer();
+    server = started.server;
+    handle = gracefulShutdown(server, { signals: [] });
+    const done = handle.shutdown('test');
+
+    // A request already read from an open connection is still served, but asks the client not to reuse the socket.
+    const request = new http.IncomingMessage(new net.Socket());
+    const response = new http.ServerResponse(request);
+    server.emit('request', request, response);
+    expect(response.getHeader('connection')).toBe('close');
+    response.emit('close');
+    await expect(done).resolves.toBe(0);
+  });
+
+  it('works with the defaults alone', async () => {
+    const started = await startServer();
+    server = started.server;
+    const before = process.listenerCount('SIGTERM');
+    handle = gracefulShutdown(server);
+    expect(process.listenerCount('SIGTERM')).toBe(before + 1);
+    handle.dispose();
+    expect(process.listenerCount('SIGTERM')).toBe(before);
   });
 });
