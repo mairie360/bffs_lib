@@ -55,6 +55,9 @@ npm test           # jest, coverage thresholds 90%
 - `src/security.ts`: `securityHeaders`, `apiOnlyHeaders`, `createRateLimiter`, `sessionKey` (MAIR-430)
 - `src/telemetry.ts`: `startTelemetry` (MAIR-504): HTTP + Express instrumentations, OTLP export of traces and metrics, off
   without `OTEL_EXPORTER_OTLP_ENDPOINT`; `RedactingSpanExporter` / `redactSpan` keep only `TELEMETRY_ATTRIBUTES`
+- `src/shutdown.ts`: `gracefulShutdown(server)`: on SIGTERM / SIGINT stops accepting, closes idle keep-alive
+  connections, lets running requests finish, ends SSE streams at once, flushes `activeTelemetry()`, exits 0; forced
+  exit 1 after `SHUTDOWN_TIMEOUT_MS` (10 s). `startTelemetry` installs no signal handler any more.
 - `src/logger.ts`: `createLogger`, `logger`, `requestLogger`, `requestId` (MAIR-531): JSON lines on stdout
   (`timestamp`, `level`, `target`, `message`, scalar fields), request log (method, route, status, duration, request id);
   `errorHandler`, `checkApis` and the OpenTelemetry diagnostics (`diagLogger`) write through it

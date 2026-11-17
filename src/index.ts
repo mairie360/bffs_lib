@@ -62,6 +62,7 @@ export {
   urlTemplate,
   telemetryEnabled,
   startTelemetry,
+  activeTelemetry,
   type Telemetry,
   type TelemetryOptions,
 } from './telemetry';
@@ -106,3 +107,4 @@ export {
   type UsageLedger,
   type UsageLedgerOptions,
 } from './usage';
+export { gracefulShutdown, SHUTDOWN_TIMEOUT_MS, type GracefulShutdown, type GracefulShutdownOptions } from './shutdown';

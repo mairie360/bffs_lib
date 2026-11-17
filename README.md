@@ -182,7 +182,8 @@ import app from './app';
 - No personal data (MAIR-290, MAIR-501): only `TELEMETRY_ATTRIBUTES` are exported. No URL, query string,
   body, header, client IP or user agent; the path of an outgoing call becomes `url.template`
   (`/api/v1/users/{id}/groups`), status messages are dropped and exceptions keep their type only.
-- On SIGTERM / SIGINT the pending telemetry is flushed (at most 5 s), then the signal is raised again.
+- The lib installs no signal handler here: `gracefulShutdown` (below) flushes the telemetry (at most 5 s) once the
+  server is drained.
 
 | Variable | Role |
 | --- | --- |
@@ -190,6 +191,27 @@ import app from './app';
 | `OTEL_SDK_DISABLED` | `true` turns telemetry off even with an endpoint |
 | `OTEL_SERVICE_NAME` | overrides `serviceName` |
 | `OTEL_RESOURCE_ATTRIBUTES` | extra resource attributes, e.g. `deployment.environment.name=prod` |
+
+## Graceful shutdown
+
+Every BFF stops through `gracefulShutdown`, with the server `app.listen` returns:
+
+```ts
+// src/index.ts
+import { gracefulShutdown } from '@mairie360/bffs-lib';
+
+const server = app.listen(port, '0.0.0.0', () => logger.info('server listening', { port }));
+gracefulShutdown(server);
+```
+
+On SIGTERM (Kubernetes) or SIGINT the server stops accepting connections, closes the idle keep-alive ones, lets the
+running requests finish (they answer with `Connection: close`), ends the SSE streams at once (`EventSource`
+reconnects to another pod), flushes the telemetry `startTelemetry` started, then exits with 0. After
+`SHUTDOWN_TIMEOUT_MS` (10 s, `timeoutMs` option) the remaining connections are destroyed and it exits with 1.
+
+The image must run an init as PID 1 so the signal reaches Node (`apk add --no-cache tini`,
+`ENTRYPOINT ["/sbin/tini", "--"]`), and the pod's `preStop` (`sleep 5` in the Deploiment chart) leaves Traefik the
+time to stop routing to it before SIGTERM.
 
 ## Structured logs (MAIR-531)
 
