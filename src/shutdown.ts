@@ -49,7 +49,8 @@ export function gracefulShutdown(server: Server, options: GracefulShutdownOption
     running.add(response);
     response.once('close', () => running.delete(response));
   };
-  server.on('request', track);
+  // First listener, before the app answers: a request read during the drain must get `Connection: close`.
+  server.prependListener('request', track);
 
   const flush = async (): Promise<void> => {
     const telemetry = options.telemetry ?? activeTelemetry();
@@ -70,13 +71,13 @@ export function gracefulShutdown(server: Server, options: GracefulShutdownOption
         for (const response of running) {
           if (!response.headersSent) {
             response.setHeader('Connection', 'close');
-            continue;
+          } else {
+            // Head already sent with keep-alive: the connection would then wait idle for keepAliveTimeout. Once this
+            // response is done, the connections left idle are closed; one with a pipelined request still to answer
+            // is not idle, and that request gets `Connection: close` from `track`.
+            response.once('finish', () => setImmediate(() => server.closeIdleConnections()));
           }
-          // Head already sent with keep-alive: the connection would then wait idle for keepAliveTimeout, so it is
-          // ended once this response is.
-          // The socket is read now: the response detaches from it when it finishes.
-          const socket = response.socket;
-          response.once('finish', () => socket?.end());
+          // An SSE stream never ends by itself, whether or not its head is already sent.
           if (isStream(response)) response.end();
         }
       });
@@ -107,7 +108,8 @@ export function gracefulShutdown(server: Server, options: GracefulShutdownOption
       void shutdown(signal).then(exit);
     };
     handlers.set(signal, handler);
-    process.once(signal, handler);
+    // `on`, not `once`: a second signal during the drain must find the handler, not Node's default (exit).
+    process.on(signal, handler);
   }
 
   return {

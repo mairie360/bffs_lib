@@ -20,6 +20,11 @@ function startServer(): Promise<{ server: Server; url: string; release: () => vo
     await released;
     res.end('end');
   });
+  app.get('/stream-later', async (_req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    await released;
+    if (!res.writableEnded) res.write(': late\n\n');
+  });
   app.get('/stream', (_req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.flushHeaders();
@@ -151,13 +156,13 @@ describe('MAIR-682 gracefulShutdown', () => {
     const started = await startServer();
     server = started.server;
     const handlers = new Map<string, () => void>();
-    const once = jest.spyOn(process, 'once').mockImplementation(((signal: string, handler: () => void) => {
+    const on = jest.spyOn(process, 'on').mockImplementation(((signal: string, handler: () => void) => {
       handlers.set(signal, handler);
       return process;
-    }) as typeof process.once);
+    }) as typeof process.on);
     const exit = jest.fn();
     handle = gracefulShutdown(server, { exit });
-    once.mockRestore();
+    on.mockRestore();
     expect([...handlers.keys()]).toEqual(['SIGTERM', 'SIGINT']);
 
     handlers.get('SIGTERM')?.();
@@ -188,13 +193,13 @@ describe('MAIR-682 gracefulShutdown', () => {
     const started = await startServer();
     server = started.server;
     const handlers = new Map<string, () => void>();
-    const once = jest.spyOn(process, 'once').mockImplementation(((signal: string, handler: () => void) => {
+    const on = jest.spyOn(process, 'on').mockImplementation(((signal: string, handler: () => void) => {
       handlers.set(signal, handler);
       return process;
-    }) as typeof process.once);
+    }) as typeof process.on);
     const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     handle = gracefulShutdown(server, { signals: ['SIGTERM'] });
-    once.mockRestore();
+    on.mockRestore();
 
     handlers.get('SIGTERM')?.();
     await handle.shutdown();
@@ -225,5 +230,56 @@ describe('MAIR-682 gracefulShutdown', () => {
     expect(process.listenerCount('SIGTERM')).toBe(before + 1);
     handle.dispose();
     expect(process.listenerCount('SIGTERM')).toBe(before);
+  });
+  it('ends an SSE stream whose head is not sent yet', async () => {
+    const started = await startServer();
+    server = started.server;
+    handle = gracefulShutdown(server, { signals: [], timeoutMs: 5_000 });
+
+    const stream = get(`${started.url}/stream-later`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const startedAt = Date.now();
+    await expect(handle.shutdown('test')).resolves.toBe(0);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    await expect(stream).resolves.toMatchObject({ status: 200, connection: 'close' });
+    started.release();
+  });
+
+  it('keeps the socket of a pipelined response that is still queued', async () => {
+    const started = await startServer();
+    server = started.server;
+    handle = gracefulShutdown(server, { signals: [] });
+    const { port } = server.address() as AddressInfo;
+
+    // Head of /chunked sent before SIGTERM, /fast queued behind it on the same connection.
+    const socket = net.connect(port, '127.0.0.1');
+    let raw = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk) => { raw += chunk; });
+    const closed = new Promise<void>((resolve) => socket.on('close', () => resolve()));
+    socket.write('GET /chunked HTTP/1.1\r\nHost: x\r\n\r\nGET /fast HTTP/1.1\r\nHost: x\r\n\r\n');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const done = handle.shutdown('test');
+    started.release();
+    await expect(done).resolves.toBe(0);
+    await closed;
+    expect(raw).toContain('start ');
+    expect(raw).toContain('{"ok":true}');
+  });
+
+  it('keeps handling the signal during the drain, so a second SIGTERM does not kill the process', async () => {
+    const started = await startServer();
+    server = started.server;
+    const before = process.listenerCount('SIGTERM');
+    const exit = jest.fn();
+    handle = gracefulShutdown(server, { exit, signals: ['SIGTERM'] });
+    const listeners = process.listeners('SIGTERM');
+    const handler = listeners[listeners.length - 1] as () => void;
+    handler();
+    expect(process.listenerCount('SIGTERM')).toBe(before + 1);
+    handler();
+    await handle.shutdown();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(exit).toHaveBeenCalledTimes(1);
   });
 });
