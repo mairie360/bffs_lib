@@ -72,10 +72,17 @@ export function gracefulShutdown(server: Server, options: GracefulShutdownOption
           if (!response.headersSent) {
             response.setHeader('Connection', 'close');
           } else {
-            // Head already sent with keep-alive: the connection would then wait idle for keepAliveTimeout. Once this
-            // response is done, the connections left idle are closed; one with a pipelined request still to answer
-            // is not idle, and that request gets `Connection: close` from `track`.
-            response.once('finish', () => setImmediate(() => server.closeIdleConnections()));
+            // Head already sent with keep-alive: the connection would then wait idle for keepAliveTimeout. Once the
+            // last response of the socket is done, the socket is ended: `end()` flushes the pending bytes first,
+            // unlike the destroy of `closeIdleConnections`. A pipelined response still queued keeps it open. The
+            // socket comes from the request: a queued response is not attached to it yet.
+            response.once('finish', () => {
+              const socket = response.req?.socket;
+              const shared = [...running].some(
+                (other) => other !== response && other.req?.socket === socket && !other.writableFinished,
+              );
+              if (socket && !shared) socket.end();
+            });
           }
           // An SSE stream never ends by itself, whether or not its head is already sent.
           if (isStream(response)) response.end();

@@ -11,6 +11,7 @@ function startServer(): Promise<{ server: Server; url: string; release: () => vo
   let release = () => {};
   const released = new Promise<void>((resolve) => { release = resolve; });
   app.get('/fast', (_req, res) => { res.json({ ok: true }); });
+  app.get('/big', (_req, res) => { res.type('text/plain').send('x'.repeat(2 * 1024 * 1024)); });
   app.get('/slow', async (_req, res) => {
     await released;
     res.json({ done: true });
@@ -281,5 +282,26 @@ describe('MAIR-682 gracefulShutdown', () => {
     await handle.shutdown();
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(exit).toHaveBeenCalledTimes(1);
+  });
+  it('delivers the whole body of a large pipelined response before closing the socket', async () => {
+    const started = await startServer();
+    server = started.server;
+    handle = gracefulShutdown(server, { signals: [] });
+    const { port } = server.address() as AddressInfo;
+
+    const socket = net.connect(port, '127.0.0.1');
+    socket.pause(); // backpressure: the 2 MB body stays queued on the server side
+    let received = 0;
+    socket.on('data', (chunk: Buffer) => { received += chunk.length; });
+    const closed = new Promise<void>((resolve) => socket.on('close', () => resolve()));
+    socket.write('GET /chunked HTTP/1.1\r\nHost: x\r\n\r\nGET /big HTTP/1.1\r\nHost: x\r\n\r\n');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const done = handle.shutdown('test');
+    started.release();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    socket.resume();
+    await closed;
+    await expect(done).resolves.toBe(0);
+    expect(received).toBeGreaterThan(2 * 1024 * 1024);
   });
 });
