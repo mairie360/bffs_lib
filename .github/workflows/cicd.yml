@@ -11,9 +11,9 @@ permissions:
 
 jobs:
   CICD:
-    uses: mairie360/CICD/.github/workflows/bffs-lib-cicd.yml@v5.2.2
+    uses: mairie360/CICD/.github/workflows/bffs-lib-cicd.yml@v5.11.1
     with:
-      cicd_version: v5.2.2
+      cicd_version: v5.11.1
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       N8N_WEBHOOK_SECRET: ${{ secrets.N8N_WEBHOOK_SECRET }}

@@ -41,7 +41,7 @@ const EXCEPTION_ATTRIBUTES = new Set(['exception.type']);
 /** Paths not traced by default: the Kubernetes probes would flood the traces. */
 export const UNTRACED_PATHS: readonly string[] = ['/health'];
 
-/** Longest wait for the last spans and metrics on SIGTERM / SIGINT, well under the Kubernetes grace period. */
+/** Longest wait for the last spans and metrics on shutdown, well under the Kubernetes grace period. */
 export const TELEMETRY_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 export interface TelemetryOptions {
@@ -51,7 +51,10 @@ export interface TelemetryOptions {
   serviceVersion?: string;
   /** Incoming paths not traced (exact match, query string ignored). Default `UNTRACED_PATHS`. */
   untracedPaths?: readonly string[];
-  /** Flush the telemetry before exiting on SIGTERM / SIGINT. Default true. */
+  /**
+   * @deprecated Ignored: the signals are handled by `gracefulShutdown`, which drains the server and then flushes the
+   * telemetry `startTelemetry` started.
+   */
   handleSignals?: boolean;
 }
 
@@ -171,6 +174,13 @@ export const diagLogger: DiagLogger = {
   verbose: (message) => logger.debug(maskValues(message), { source: 'opentelemetry' }),
 };
 
+let current: Telemetry | undefined;
+
+/** The telemetry `startTelemetry` started in this process, flushed by `gracefulShutdown`. */
+export function activeTelemetry(): Telemetry | undefined {
+  return current;
+}
+
 export function startTelemetry(options: TelemetryOptions): Telemetry | undefined {
   if (!telemetryEnabled()) return undefined;
   diag.setLogger(diagLogger, DiagLogLevel.ERROR);
@@ -215,14 +225,7 @@ export function startTelemetry(options: TelemetryOptions): Telemetry | undefined
     },
   };
 
-  if (options.handleSignals ?? true) {
-    for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-      process.once(signal, () => {
-        const timeout = new Promise<void>((resolve) => setTimeout(resolve, TELEMETRY_SHUTDOWN_TIMEOUT_MS).unref());
-        void Promise.race([telemetry.shutdown(), timeout]).finally(() => process.kill(process.pid, signal));
-      });
-    }
-  }
+  current = telemetry;
 
   logger.info('telemetry enabled', { service: options.serviceName });
   return telemetry;

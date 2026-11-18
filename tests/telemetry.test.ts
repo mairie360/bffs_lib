@@ -8,6 +8,7 @@ import {
   diagLogger,
   redactSpan,
   startTelemetry,
+  activeTelemetry,
   telemetryEnabled,
   urlTemplate,
 } from '../src';
@@ -134,31 +135,17 @@ describe('startTelemetry', () => {
     expect(startTelemetry({ serviceName: 'bff-test' })).toBeUndefined();
   });
 
-  it('starts, flushes on SIGTERM then re-raises the signal', async () => {
-    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://127.0.0.1:9';
-    captureLogs();
-    const handlers = new Map<string, () => void>();
-    jest.spyOn(process, 'once').mockImplementation(((signal: string, handler: () => void) => {
-      handlers.set(signal, handler);
-      return process;
-    }) as typeof process.once);
-    const kill = jest.spyOn(process, 'kill').mockImplementation(() => true);
-
-    const telemetry = startTelemetry({ serviceName: 'bff-test', serviceVersion: '1.0.0' });
-    expect(telemetry).toBeDefined();
-    expect([...handlers.keys()]).toEqual(['SIGTERM', 'SIGINT']);
-
-    handlers.get('SIGTERM')?.();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(kill).toHaveBeenCalledWith(process.pid, 'SIGTERM');
-  });
-
-  it('leaves the signals alone with handleSignals: false', async () => {
+  it('MAIR-682 starts without handling the signals, and is the active telemetry', async () => {
     process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://127.0.0.1:9';
     captureLogs();
     const once = jest.spyOn(process, 'once');
-    const telemetry = startTelemetry({ serviceName: 'bff-test', handleSignals: false, untracedPaths: [] });
+    const kill = jest.spyOn(process, 'kill');
+    const telemetry = startTelemetry({ serviceName: 'bff-test', serviceVersion: '1.0.0', untracedPaths: [] });
+    expect(telemetry).toBeDefined();
+    expect(activeTelemetry()).toBe(telemetry);
+    // The signals belong to gracefulShutdown, which drains the server first; re-raising SIGTERM killed requests.
     expect(once).not.toHaveBeenCalled();
+    expect(kill).not.toHaveBeenCalled();
     await expect(telemetry?.shutdown()).resolves.toBeUndefined();
   });
 });
