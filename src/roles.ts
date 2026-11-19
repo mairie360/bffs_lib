@@ -44,7 +44,7 @@ const CORE_ROLE_ALIASES: Readonly<Record<string, CoreRole>> = Object.freeze({
 
 /**
  * The Core role a name stands for ("Administrateur", "ROLE_ADMIN" and " admin " are `Admin`), or `null` for a
- * custom role or a value that is not a string. The one rule every BFF uses to recognise a role (MAIR-689).
+ * custom role or a value that is not a string. The one rule every BFF uses to recognise a role.
  */
 export function canonicalRole(role: unknown): CoreRole | null {
   if (typeof role !== 'string') return null;
