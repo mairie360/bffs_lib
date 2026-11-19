@@ -68,7 +68,10 @@ export {
 } from './telemetry';
 export { DEFAULT_CONCURRENCY, mapWithConcurrency, readOffsetPages, type OffsetPagesOptions } from './concurrency';
 export { MemoryCache, callerKey, type MemoryCacheOptions } from './cache';
-export { roleKey, hasRole, PROJECT_TASK_MANAGER_ROLES } from './roles';
+export {
+  CORE_ROLES, PROJECT_TASK_MANAGER_ROLES, canonicalRole, canonicalRoles, hasRole, isAdminRole, isManagerRole, roleKey,
+} from './roles';
+export type { CoreRole } from './roles';
 export {
   LOG_FORMATS,
   LOG_LEVELS,
