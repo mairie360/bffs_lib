@@ -181,6 +181,7 @@ describe('MAIR-538 public surface of the lib (src/index.ts)', () => {
   it('exports exactly the documented runtime API', () => {
     expect(Object.keys(lib).sort()).toEqual([
       'CLIENT_IP_HEADER',
+      'CORE_ROLES',
       'DEFAULT_CONCURRENCY',
       'DEFAULT_MAX_TTL_SECONDS',
       'DEFAULT_USAGE_PERIOD_MS',
@@ -222,6 +223,8 @@ describe('MAIR-538 public surface of the lib (src/index.ts)', () => {
       'buildErrorResponse',
       'callUpstream',
       'callerKey',
+      'canonicalRole',
+      'canonicalRoles',
       'checkApis',
       'checkApisResponseSchema',
       'clientIp',
@@ -239,6 +242,8 @@ describe('MAIR-538 public surface of the lib (src/index.ts)', () => {
       'gracefulShutdown',
       'hasRole',
       'httpErrorBody',
+      'isAdminRole',
+      'isManagerRole',
       'logger',
       'mapUpstreamError',
       'mapWithConcurrency',
