@@ -6,8 +6,7 @@ import { HttpError } from './errors';
 /**
  * Session tokens verified by the BFF itself (MAIR-474, MAIR-680).
  *
- * Every session token a BFF receives is a Core API session JWT (a Keycloak sign-in also ends with a Core session
- * token). Verifying it here refuses a forged token with a 401 before any upstream call, and gives the handlers a
+ * Every session token a BFF receives is a Core API session JWT. Verifying it here refuses a forged token with a 401 before any upstream call, and gives the handlers a
  * caller id they can trust, instead of the unverified `sub` of `unverifiedSubject`.
  *
  * Since MAIR-680 only Core can sign: it signs with an Ed25519 private key (`alg` EdDSA, `kid` = RFC 7638 thumbprint
