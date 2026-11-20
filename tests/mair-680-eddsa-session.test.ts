@@ -65,7 +65,7 @@ describe('MAIR-680 Ed25519 session tokens', () => {
     ['another key claiming Core kid', signEd(claims(), { privatePem: OTHER_PRIVATE_KEY })],
     ['another key with its own kid', signEd(claims(), { privatePem: OTHER_PRIVATE_KEY, header: { alg: 'EdDSA', kid: kidOf(OTHER_PUBLIC_KEY) } })],
     ['no kid', signEd(claims(), { header: { alg: 'EdDSA' } })],
-    ['another issuer', signEd(claims({ iss: 'keycloak' }))],
+    ['another issuer', signEd(claims({ iss: 'another-issuer' }))],
     ['another audience', signEd(claims({ aud: 'n8n' }))],
     ['no iss nor aud', signEd({ sub: '2', exp: NOW + 3600 })],
     ['expired', signEd(claims({ exp: NOW }))],
