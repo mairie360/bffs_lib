@@ -1,4 +1,4 @@
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { createHash, createPublicKey, generateKeyPairSync } from 'node:crypto';
 import express from 'express';
 import request from 'supertest';
 import {
@@ -75,8 +75,8 @@ describe('MAIR-680 Ed25519 session tokens', () => {
     // RFC 8037 appendix A.3.
     const rfc = '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\n-----END PUBLIC KEY-----';
     expect(kidOf(rfc)).toBe('kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k');
-    expect(CORE_KID).toBe(createHash('sha256')
-      .update('{"crv":"Ed25519","kty":"OKP","x":"KW8bV4kiFUo8hmOEU3-lXdqZL1wmKvBw6smUyjpmXks"}').digest('base64url'));
+    const { x } = createPublicKey(CORE_PUBLIC_KEY).export({ format: 'jwk' });
+    expect(CORE_KID).toBe(createHash('sha256').update(`{"crv":"Ed25519","kty":"OKP","x":"${x}"}`).digest('base64url'));
   });
 
   it('parses escaped line breaks and refuses what is not an Ed25519 public key', () => {

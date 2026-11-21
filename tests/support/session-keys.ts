@@ -1,25 +1,20 @@
-import { createHmac, createPrivateKey, sign as edSign } from 'node:crypto';
+import { createHmac, createPrivateKey, generateKeyPairSync, sign as edSign, type KeyPairKeyObjectResult } from 'node:crypto';
 import { SESSION_JWT_AUDIENCE, SESSION_JWT_ISSUER, parseSessionPublicKeys } from '../../src';
 
-// Session tokens signed like Core signs them (EdDSA). Same test key pair as mairie360_api_lib
-// (`http_setup::TEST_JWT_*`), so tokens are interchangeable.
-export const CORE_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIB0n4h8LIrWP97xwhhjiuwTUvTF3l1E0MlDPQdPtlWcN
------END PRIVATE KEY-----
-`;
-export const CORE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAKW8bV4kiFUo8hmOEU3+lXdqZL1wmKvBw6smUyjpmXks=
------END PUBLIC KEY-----
-`;
+// Session tokens signed like Core signs them (EdDSA). The key pairs are generated when the tests load: no private
+// key is committed.
+const pem = (pair: KeyPairKeyObjectResult) => ({
+  privatePem: pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+  publicPem: pair.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+});
+const core = pem(generateKeyPairSync('ed25519'));
 /** An attacker's key pair, or the next key of a rotation: never in `JWT_PUBLIC_KEY` unless stated. */
-export const OTHER_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEII1DTYiu+dcwBgtEKil59uTH8s7XfrxGrbD+/P0sXq/8
------END PRIVATE KEY-----
-`;
-export const OTHER_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAtZHz1BNkijjkLJlnK9l7vikDl0aivrmbwllpT68Lnss=
------END PUBLIC KEY-----
-`;
+const other = pem(generateKeyPairSync('ed25519'));
+
+export const CORE_PRIVATE_KEY = core.privatePem;
+export const CORE_PUBLIC_KEY = core.publicPem;
+export const OTHER_PRIVATE_KEY = other.privatePem;
+export const OTHER_PUBLIC_KEY = other.publicPem;
 
 export const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
 export const kidOf = (publicPem: string) => [...parseSessionPublicKeys(publicPem).keys()][0];
