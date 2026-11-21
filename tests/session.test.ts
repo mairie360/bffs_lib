@@ -1,4 +1,3 @@
-import { createHmac } from 'node:crypto';
 import express from 'express';
 import request from 'supertest';
 import {
@@ -9,29 +8,30 @@ import {
   sessionRole,
   sessionUserId,
   verifiedSession,
+  parseSessionPublicKeys,
   verifySessionToken,
 } from '../src';
+import { CORE_PUBLIC_KEY, OTHER_PRIVATE_KEY, part, sessionClaims, signEd } from './support/session-keys';
 
-const SECRET = 'session-test-secret-0123456789abcdef';
 const NOW = 1_800_000_000;
+const KEYS = { publicKeys: parseSessionPublicKeys(CORE_PUBLIC_KEY) };
 
-const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
-
-function sign(payload: unknown, { secret = SECRET, header = { alg: 'HS256', typ: 'JWT' } } = {}): string {
-  const unsigned = `${part(header)}.${part(payload)}`;
-  return `${unsigned}.${createHmac('sha256', secret).update(unsigned).digest('base64url')}`;
+/** Signs like Core: EdDSA, Core's `iss` and `aud` added to an object payload. */
+function sign(payload: unknown, { privatePem = undefined as string | undefined, header = undefined as object | undefined } = {}): string {
+  const claims = typeof payload === 'object' && payload !== null && !Array.isArray(payload) ? sessionClaims(payload) : payload;
+  return signEd(claims, { ...(privatePem ? { privatePem } : {}), ...(header ? { header } : {}) });
 }
 
 const genuine = sign({ sub: '2', role: 'user', exp: NOW + 3600 });
 
-/** The tokens an attacker can build without the secret, labelled for the failure message. */
+/** The tokens an attacker can build without Core's private key, labelled for the failure message. */
 function forgedTokens(): [string, string][] {
   const [header, , signature] = genuine.split('.');
   return [
     ['garbage', 'not.a.jwt'],
     ['two parts', 'abc.def'],
     ['empty signature', `${genuine.split('.').slice(0, 2).join('.')}.`],
-    ['other secret', sign({ sub: '2', exp: NOW + 3600 }, { secret: 'not-the-secret' })],
+    ['another key', sign({ sub: '2', exp: NOW + 3600 }, { privatePem: OTHER_PRIVATE_KEY })],
     ['expired', sign({ sub: '2', exp: NOW - 1 })],
     ['expiring now', sign({ sub: '2', exp: NOW })],
     ['no exp', sign({ sub: '2' })],
@@ -49,12 +49,12 @@ function forgedTokens(): [string, string][] {
 
 describe('verifySessionToken', () => {
   it('accepts a genuine token and returns its caller', () => {
-    expect(verifySessionToken(genuine, SECRET, NOW)).toEqual({ userId: 2, expiresAt: NOW + 3600, role: 'user' });
-    expect(verifySessionToken(sign({ sub: 42, exp: NOW + 1 }), SECRET, NOW).userId).toBe(42);
+    expect(verifySessionToken(genuine, KEYS, NOW)).toEqual({ userId: 2, expiresAt: NOW + 3600, role: 'user' });
+    expect(verifySessionToken(sign({ sub: 42, exp: NOW + 1 }), KEYS, NOW).userId).toBe(42);
   });
 
   it.each(forgedTokens())('refuses a token with %s with a 401, without saying why', (_label, token) => {
-    expect(() => verifySessionToken(token, SECRET, NOW)).toThrow(
+    expect(() => verifySessionToken(token, KEYS, NOW)).toThrow(
       expect.objectContaining({ status: 401, message: INVALID_TOKEN_MESSAGE }),
     );
   });
@@ -68,11 +68,11 @@ describe('requireSession', () => {
   const fresh = sign({ sub: '7', exp: Math.floor(Date.now() / 1000) + 3600 });
 
   beforeEach(() => {
-    process.env.JWT_SECRET = SECRET;
+    process.env.JWT_PUBLIC_KEY = CORE_PUBLIC_KEY;
   });
 
   afterAll(() => {
-    delete process.env.JWT_SECRET;
+    delete process.env.JWT_PUBLIC_KEY;
   });
 
   it('lets a genuine token through and exposes the verified caller', async () => {
@@ -84,7 +84,7 @@ describe('requireSession', () => {
   it.each([
     ['no header', undefined],
     ['another scheme', `Basic ${fresh}`],
-    ['a forged token', `Bearer ${sign({ sub: '7', exp: Math.floor(Date.now() / 1000) + 3600 }, { secret: 'other' })}`],
+    ['a forged token', `Bearer ${sign({ sub: '7', exp: Math.floor(Date.now() / 1000) + 3600 }, { privatePem: OTHER_PRIVATE_KEY })}`],
     ['an expired token', `Bearer ${sign({ sub: '7', exp: Math.floor(Date.now() / 1000) - 1 })}`],
   ])('answers 401 in the envelope with %s', async (_label, header) => {
     const req = request(app).get('/private');
@@ -93,8 +93,8 @@ describe('requireSession', () => {
     expect(ErrorResponseSchema.parse(res.body).error.code).toBe('UNAUTHORIZED');
   });
 
-  it('answers 503 when JWT_SECRET is not set, before reading the token', async () => {
-    delete process.env.JWT_SECRET;
+  it('answers 503 when JWT_PUBLIC_KEY is not set, before reading the token', async () => {
+    delete process.env.JWT_PUBLIC_KEY;
     const res = await request(app).get('/private').set('Authorization', `Bearer ${fresh}`);
     expect(res.status).toBe(503);
   });
@@ -107,17 +107,17 @@ describe('requireSession', () => {
 
 describe('role of the verified token (MAIR-529)', () => {
   it('reads the `role` claim, trimmed', () => {
-    expect(verifySessionToken(sign({ sub: '2', role: ' Admin ', exp: NOW + 3600 }), SECRET, NOW).role).toBe('Admin');
+    expect(verifySessionToken(sign({ sub: '2', role: ' Admin ', exp: NOW + 3600 }), KEYS, NOW).role).toBe('Admin');
   });
 
   it('has no role when the claim is missing, blank or not a string (tokens issued before MAIR-529)', () => {
     for (const payload of [{}, { role: '' }, { role: '  ' }, { role: ['admin'] }, { role: 1 }, { roles: ['admin'] }]) {
-      expect(verifySessionToken(sign({ sub: '2', exp: NOW + 3600, ...payload }), SECRET, NOW).role).toBeUndefined();
+      expect(verifySessionToken(sign({ sub: '2', exp: NOW + 3600, ...payload }), KEYS, NOW).role).toBeUndefined();
     }
   });
 
   it('exposes it to the routes behind requireSession, and refuses a route without it', async () => {
-    process.env.JWT_SECRET = SECRET;
+    process.env.JWT_PUBLIC_KEY = CORE_PUBLIC_KEY;
     jest.useFakeTimers({ now: NOW * 1000 });
     try {
       const app = express();
@@ -128,13 +128,13 @@ describe('role of the verified token (MAIR-529)', () => {
       expect((await request(app).get('/role').set('Authorization', `Bearer ${withRole}`)).body).toEqual({ role: 'Admin' });
       const withoutRole = sign({ sub: '2', role: '', exp: NOW + 3600 });
       expect((await request(app).get('/role').set('Authorization', `Bearer ${withoutRole}`)).body).toEqual({ role: null });
-      // A role signed with another secret is never read: the token is refused before the route.
-      const forged = sign({ sub: '2', role: 'Admin', exp: NOW + 3600 }, { secret: 'other' });
+      // A role signed with another key is never read: the token is refused before the route.
+      const forged = sign({ sub: '2', role: 'Admin', exp: NOW + 3600 }, { privatePem: OTHER_PRIVATE_KEY });
       expect((await request(app).get('/role').set('Authorization', `Bearer ${forged}`)).status).toBe(401);
       expect((await request(app).get('/open').set('Authorization', `Bearer ${withRole}`)).status).toBe(401);
     } finally {
       jest.useRealTimers();
-      delete process.env.JWT_SECRET;
+      delete process.env.JWT_PUBLIC_KEY;
     }
   });
 });

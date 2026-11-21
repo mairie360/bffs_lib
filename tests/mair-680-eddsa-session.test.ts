@@ -1,4 +1,4 @@
-import { createHash, createHmac, createPrivateKey, generateKeyPairSync, sign as edSign } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import express from 'express';
 import request from 'supertest';
 import {
@@ -13,47 +13,26 @@ import {
   verifySessionToken,
   type SessionKeys,
 } from '../src';
+import {
+  CORE_KID,
+  CORE_PRIVATE_KEY,
+  CORE_PUBLIC_KEY,
+  OTHER_PRIVATE_KEY,
+  OTHER_PUBLIC_KEY,
+  kidOf,
+  signEd,
+  signHs,
+} from './support/session-keys';
 
 // MAIR-680: only Core signs session tokens, with an Ed25519 key; the BFFs hold its public key only.
-// Same test key pairs as mairie360_api_lib (`http_setup::TEST_JWT_*`), so tokens are interchangeable.
-const CORE_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIB0n4h8LIrWP97xwhhjiuwTUvTF3l1E0MlDPQdPtlWcN
------END PRIVATE KEY-----
-`;
-const CORE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAKW8bV4kiFUo8hmOEU3+lXdqZL1wmKvBw6smUyjpmXks=
------END PUBLIC KEY-----
-`;
-const OTHER_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEII1DTYiu+dcwBgtEKil59uTH8s7XfrxGrbD+/P0sXq/8
------END PRIVATE KEY-----
-`;
-const OTHER_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEAtZHz1BNkijjkLJlnK9l7vikDl0aivrmbwllpT68Lnss=
------END PUBLIC KEY-----
-`;
-const SECRET = 'session-test-secret-0123456789abcdef';
+/** The shared HS256 secret of the transition: it must verify nothing any more. */
+const OLD_SECRET = 'session-test-secret-0123456789abcdef';
 const NOW = 1_800_000_000;
-
-const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
-const kidOf = (publicPem: string) => [...parseSessionPublicKeys(publicPem).keys()][0];
-const CORE_KID = kidOf(CORE_PUBLIC_KEY);
-
-function signEd(payload: unknown, { privatePem = CORE_PRIVATE_KEY, header = { alg: 'EdDSA', typ: 'JWT', kid: CORE_KID } as object } = {}) {
-  const unsigned = `${part(header)}.${part(payload)}`;
-  return `${unsigned}.${edSign(null, Buffer.from(unsigned), createPrivateKey(privatePem)).toString('base64url')}`;
-}
-
-function signHs(payload: unknown, secret: string | Buffer = SECRET) {
-  const unsigned = `${part({ alg: 'HS256', typ: 'JWT' })}.${part(payload)}`;
-  return `${unsigned}.${createHmac('sha256', secret).update(unsigned).digest('base64url')}`;
-}
 
 const claims = (extra: object = {}) => ({
   sub: '2', role: 'Admin', exp: NOW + 3600, iss: SESSION_JWT_ISSUER, aud: SESSION_JWT_AUDIENCE, ...extra,
 });
 const publicOnly: SessionKeys = { publicKeys: parseSessionPublicKeys(CORE_PUBLIC_KEY) };
-const transition: SessionKeys = { ...publicOnly, secret: SECRET };
 
 describe('MAIR-680 Ed25519 session tokens', () => {
   it('accepts a token Core signed with its key', () => {
@@ -70,25 +49,19 @@ describe('MAIR-680 Ed25519 session tokens', () => {
     ['no iss nor aud', signEd({ sub: '2', exp: NOW + 3600 })],
     ['expired', signEd(claims({ exp: NOW }))],
     ['HS256 signed with the public key', signHs(claims(), Buffer.from(CORE_PUBLIC_KEY))],
-    ['HS256 with the old secret, once the secret is removed', signHs({ sub: '2', exp: NOW + 3600 })],
+    ['HS256 with the old secret', signHs({ sub: '2', exp: NOW + 3600 }, OLD_SECRET)],
   ])('refuses %s with a 401', (_label, token) => {
     expect(() => verifySessionToken(token, publicOnly, NOW)).toThrow(
       expect.objectContaining({ status: 401, message: INVALID_TOKEN_MESSAGE }),
     );
   });
 
-  it('keeps accepting HS256 tokens while JWT_SECRET is still set (transition)', () => {
-    expect(verifySessionToken(signHs({ sub: '2', exp: NOW + 3600 }), transition, NOW).userId).toBe(2);
-    expect(verifySessionToken(signEd(claims()), transition, NOW).userId).toBe(2);
-  });
-
-  it.each(['', '   '])('never verifies HS256 with a blank secret (%j)', (blank) => {
-    const forged = signHs({ sub: '1', role: 'Admin', exp: NOW + 3600 }, blank);
-    expect(() => verifySessionToken(forged, { ...publicOnly, secret: blank }, NOW)).toThrow(
-      expect.objectContaining({ status: 401 }),
-    );
-    expect(sessionKeysFromEnv({ JWT_PUBLIC_KEY: CORE_PUBLIC_KEY, JWT_SECRET: blank })?.secret).toBeUndefined();
-    expect(sessionKeysFromEnv({ JWT_SECRET: blank })).toBeUndefined();
+  it('ignores JWT_SECRET: it neither verifies HS256 nor replaces the public key', () => {
+    expect(sessionKeysFromEnv({ JWT_SECRET: OLD_SECRET })).toBeUndefined();
+    const keys = sessionKeysFromEnv({ JWT_PUBLIC_KEY: CORE_PUBLIC_KEY, JWT_SECRET: OLD_SECRET });
+    expect(keys).toEqual({ publicKeys: expect.any(Map) });
+    const legacy = signHs({ sub: '2', role: 'Admin', exp: NOW + 3600 }, OLD_SECRET);
+    expect(() => verifySessionToken(legacy, keys as SessionKeys, NOW)).toThrow(expect.objectContaining({ status: 401 }));
   });
 
   it('accepts every published key during a rotation', () => {
@@ -117,9 +90,7 @@ describe('MAIR-680 Ed25519 session tokens', () => {
 
   it('reads the keys from the environment', () => {
     expect(sessionKeysFromEnv({})).toBeUndefined();
-    expect(sessionKeysFromEnv({ JWT_PUBLIC_KEY: CORE_PUBLIC_KEY })?.secret).toBeUndefined();
     expect(sessionKeysFromEnv({ JWT_PUBLIC_KEY: CORE_PUBLIC_KEY })?.publicKeys.has(CORE_KID)).toBe(true);
-    expect(sessionKeysFromEnv({ JWT_SECRET: SECRET })?.publicKeys.size).toBe(0);
     expect(() => sessionKeysFromEnv({ JWT_PUBLIC_KEY: 'garbage' })).toThrow();
   });
 });
@@ -135,11 +106,12 @@ describe('MAIR-680 requireSession on a BFF holding only the public key', () => {
     delete process.env.JWT_SECRET;
   });
 
-  it('lets a Core token through and refuses a forged Admin token and an old HS256 token', async () => {
+  it('lets a Core token through and refuses a forged Admin token and an old HS256 token, even with JWT_SECRET left set', async () => {
     process.env.JWT_PUBLIC_KEY = CORE_PUBLIC_KEY;
+    process.env.JWT_SECRET = OLD_SECRET;
     const genuine = signEd(claims({ sub: '7', exp: now() + 3600 }));
     const forged = signEd(claims({ sub: '1', exp: now() + 3600 }), { privatePem: OTHER_PRIVATE_KEY });
-    const legacy = signHs({ sub: '1', role: 'Admin', exp: now() + 3600 });
+    const legacy = signHs({ sub: '1', role: 'Admin', exp: now() + 3600 }, OLD_SECRET);
     const res = await request(app).get('/private').set('Authorization', `Bearer ${genuine}`);
     expect(res.status).toBe(200);
     expect(res.body.userId).toBe(7);
@@ -147,7 +119,10 @@ describe('MAIR-680 requireSession on a BFF holding only the public key', () => {
     expect((await request(app).get('/private').set('Authorization', `Bearer ${legacy}`)).status).toBe(401);
   });
 
-  it('answers 503 when JWT_PUBLIC_KEY is malformed and no secret is set', async () => {
+  it('answers 503 when JWT_PUBLIC_KEY is malformed or missing, even with JWT_SECRET set', async () => {
+    process.env.JWT_SECRET = OLD_SECRET;
+    const legacy = signHs({ sub: '1', exp: now() + 3600 }, OLD_SECRET);
+    expect((await request(app).get('/private').set('Authorization', `Bearer ${legacy}`)).status).toBe(503);
     process.env.JWT_PUBLIC_KEY = 'garbage';
     const token = signEd(claims({ exp: now() + 3600 }));
     expect((await request(app).get('/private').set('Authorization', `Bearer ${token}`)).status).toBe(503);

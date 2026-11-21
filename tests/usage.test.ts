@@ -1,7 +1,7 @@
-import { createHmac } from 'node:crypto';
 import express from 'express';
 import request from 'supertest';
 import { USAGE_METRICS_PATH, createUsageLedger, requireSession, usageMetricsHandler, usageMiddleware } from '../src';
+import { CORE_PUBLIC_KEY, sessionClaims, signEd } from './support/session-keys';
 
 const MINUTE = 60_000;
 const T0 = 100 * MINUTE;
@@ -50,16 +50,13 @@ describe('usage ledger (MAIR-501)', () => {
 });
 
 describe('usage middleware (MAIR-501)', () => {
-  const SECRET = 'usage-test-secret-0123456789abcdef';
-  const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
-  const unsigned = `${part({ alg: 'HS256', typ: 'JWT' })}.${part({ sub: '424242', exp: 4102444800 })}`;
-  const token = `${unsigned}.${createHmac('sha256', SECRET).update(unsigned).digest('base64url')}`;
+  const token = signEd(sessionClaims({ sub: '424242', exp: 4102444800 }));
 
   beforeAll(() => {
-    process.env.JWT_SECRET = SECRET;
+    process.env.JWT_PUBLIC_KEY = CORE_PUBLIC_KEY;
   });
   afterAll(() => {
-    delete process.env.JWT_SECRET;
+    delete process.env.JWT_PUBLIC_KEY;
   });
 
   it('records the route template, never the path, the query or the caller', async () => {
