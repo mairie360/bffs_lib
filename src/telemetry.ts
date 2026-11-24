@@ -1,6 +1,7 @@
 import type { IncomingMessage } from 'node:http';
-import { DiagLogLevel, diag, type Attributes, type DiagLogger, type Link } from '@opentelemetry/api';
-import type { ExportResult } from '@opentelemetry/core';
+import { DiagLogLevel, context, diag, propagation, trace, type Attributes, type DiagLogger, type Link } from '@opentelemetry/api';
+import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
+import { CompositePropagator, W3CBaggagePropagator, W3CTraceContextPropagator, type ExportResult } from '@opentelemetry/core';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 import { registerInstrumentations } from '@opentelemetry/instrumentation';
@@ -8,7 +9,7 @@ import { ExpressInstrumentation, ExpressLayerType } from '@opentelemetry/instrum
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { defaultResource, detectResources, envDetector, resourceFromAttributes } from '@opentelemetry/resources';
 import { MeterProvider, PeriodicExportingMetricReader, createAllowListAttributesProcessor } from '@opentelemetry/sdk-metrics';
-import { BatchSpanProcessor, NodeTracerProvider, type ReadableSpan, type SpanExporter } from '@opentelemetry/sdk-trace-node';
+import { BatchSpanProcessor, TracerProvider, type ReadableSpan, type SpanExporter } from '@opentelemetry/sdk-trace';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import { maskValues } from './describe-error';
 import { logger } from './logger';
@@ -194,11 +195,16 @@ export function startTelemetry(options: TelemetryOptions): Telemetry | undefined
     )
     .merge(detectResources({ detectors: [envDetector] }));
 
-  const tracerProvider = new NodeTracerProvider({
+  const tracerProvider = new TracerProvider({
     resource,
-    spanProcessors: [new BatchSpanProcessor(new RedactingSpanExporter(new OTLPTraceExporter()))],
+    spanProcessors: [new BatchSpanProcessor({ exporter: new RedactingSpanExporter(new OTLPTraceExporter()) })],
   });
-  tracerProvider.register();
+  // What NodeTracerProvider.register() did before OpenTelemetry 3: async context, W3C propagation, global provider.
+  context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+  propagation.setGlobalPropagator(
+    new CompositePropagator({ propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()] }),
+  );
+  trace.setGlobalTracerProvider(tracerProvider);
 
   const meterProvider = new MeterProvider({
     resource,

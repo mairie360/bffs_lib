@@ -1,4 +1,4 @@
-import { createHash, createHmac, createPublicKey, timingSafeEqual, verify, type KeyObject } from 'node:crypto';
+import { createHash, createPublicKey, verify, type KeyObject } from 'node:crypto';
 import type { Request, RequestHandler } from 'express';
 import { INVALID_SESSION_MESSAGE, bearerToken } from './auth';
 import { HttpError } from './errors';
@@ -11,9 +11,9 @@ import { HttpError } from './errors';
  *
  * Since MAIR-680 only Core can sign: it signs with an Ed25519 private key (`alg` EdDSA, `kid` = RFC 7638 thumbprint
  * of its public key, `iss` {@link SESSION_JWT_ISSUER}, `aud` {@link SESSION_JWT_AUDIENCE}) and the BFFs only hold
- * the public key(s), in `JWT_PUBLIC_KEY` (PEM, several `PUBLIC KEY` blocks during a key rotation). The historical
- * HS256 tokens signed with the shared `JWT_SECRET` stay accepted only while `JWT_SECRET` is set (transition): once
- * it is removed, they are refused. The checks are Core's (`mairie360_api_lib`): `exp` in the future with no leeway,
+ * the public key(s), in `JWT_PUBLIC_KEY` (PEM, several `PUBLIC KEY` blocks during a key rotation). Any other
+ * algorithm is refused, HS256 included: `JWT_SECRET` is never read. The checks are Core's (`mairie360_api_lib`):
+ * `exp` in the future with no leeway,
  * a positive integer `sub`. Whether the session was revoked or the account archived is only known upstream: the
  * token still goes to the API.
  */
@@ -21,7 +21,7 @@ import { HttpError } from './errors';
 /** Message of the 401 answered for a malformed, forged or expired token. */
 export const INVALID_TOKEN_MESSAGE = 'Invalid or expired session token.';
 
-/** Message of the 503 answered when the instance has neither `JWT_PUBLIC_KEY` nor `JWT_SECRET`. */
+/** Message of the 503 answered when the instance has no `JWT_PUBLIC_KEY`. */
 export const SESSION_NOT_CONFIGURED_MESSAGE = 'The session check is not configured.';
 
 /** `iss` claim of the session tokens Core signs with its Ed25519 key. */
@@ -34,8 +34,6 @@ export const SESSION_JWT_AUDIENCE = 'mairie360';
 export interface SessionKeys {
   /** Core's Ed25519 public keys, by `kid` (RFC 7638 thumbprint). */
   publicKeys: ReadonlyMap<string, KeyObject>;
-  /** The historical shared secret: HS256 tokens are only accepted while it is set. */
-  secret?: string;
 }
 
 /** Claims of a verified session token the BFFs use. */
@@ -85,68 +83,50 @@ export function parseSessionPublicKeys(pem: string): Map<string, KeyObject> {
   return keys;
 }
 
-let cachedKeys: { publicPem: string; secret: string; keys: SessionKeys } | undefined;
+let cachedKeys: { publicPem: string; keys: SessionKeys } | undefined;
 
 /**
- * The session keys of the environment: `JWT_PUBLIC_KEY` (parsed once per value) and `JWT_SECRET`. `undefined` when
- * neither is set. Throws when `JWT_PUBLIC_KEY` is set but malformed.
+ * The session keys of the environment: `JWT_PUBLIC_KEY`, parsed once per value. `undefined` when it is not set.
+ * Throws when it is set but malformed.
  */
 export function sessionKeysFromEnv(env: NodeJS.ProcessEnv = process.env): SessionKeys | undefined {
   const publicPem = env.JWT_PUBLIC_KEY?.trim() ?? '';
-  // A blank secret is no secret: it must never become an HMAC key anybody can sign with.
-  const secret = env.JWT_SECRET?.trim() ? env.JWT_SECRET : '';
-  if (publicPem === '' && secret === '') return undefined;
-  if (cachedKeys?.publicPem !== publicPem || cachedKeys.secret !== secret) {
-    const keys: SessionKeys = {
-      publicKeys: publicPem === '' ? new Map() : parseSessionPublicKeys(publicPem),
-      ...(secret === '' ? {} : { secret }),
-    };
-    cachedKeys = { publicPem, secret, keys };
+  if (publicPem === '') return undefined;
+  if (cachedKeys?.publicPem !== publicPem) {
+    cachedKeys = { publicPem, keys: { publicKeys: parseSessionPublicKeys(publicPem) } };
   }
   return cachedKeys.keys;
 }
 
 function checkSignature(header: Record<string, unknown>, unsigned: string, signature: string, keys: SessionKeys) {
   const received = Buffer.from(signature, 'base64url');
-  if (header.alg === 'EdDSA') {
-    const key = typeof header.kid === 'string' ? keys.publicKeys.get(header.kid) : undefined;
-    if (key === undefined) throw new Error('unknown key');
-    if (!verify(null, Buffer.from(unsigned), key, received)) throw new Error('bad signature');
-    return;
-  }
-  if (header.alg === 'HS256' && keys.secret?.trim()) {
-    const expected = createHmac('sha256', Buffer.from(keys.secret, 'utf8')).update(unsigned).digest();
-    if (received.length !== expected.length || !timingSafeEqual(received, expected)) throw new Error('bad signature');
-    return;
-  }
-  throw new Error('algorithm not accepted');
+  if (header.alg !== 'EdDSA') throw new Error('algorithm not accepted');
+  const key = typeof header.kid === 'string' ? keys.publicKeys.get(header.kid) : undefined;
+  if (key === undefined) throw new Error('unknown key');
+  if (!verify(null, Buffer.from(unsigned), key, received)) throw new Error('bad signature');
 }
 
 /**
- * Verifies a session token (without its `Bearer ` prefix) against `keys` (a bare string is the historical
- * `JWT_SECRET`). Throws a 401 `HttpError` when it is malformed, signed with an algorithm or a key that is not
- * accepted, badly signed, expired, has no positive integer `sub`, or (EdDSA) has another `iss` or `aud`; never says
- * which check failed.
+ * Verifies a session token (without its `Bearer ` prefix) against Core's public `keys`. Throws a 401 `HttpError`
+ * when it is malformed, not `EdDSA`, signed with a key that is not published, badly signed, expired, has no
+ * positive integer `sub`, or has another `iss` or `aud`; never says which check failed.
  */
 export function verifySessionToken(
   token: string,
-  keys: SessionKeys | string,
+  keys: SessionKeys,
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): VerifiedSession {
-  const sessionKeys: SessionKeys = typeof keys === 'string' ? { publicKeys: new Map(), secret: keys } : keys;
   try {
     const parts = token.split('.');
     if (parts.length !== 3) throw new Error('not a JWT');
     const [encodedHeader, encodedPayload, signature] = parts;
     const header = decodePart(encodedHeader);
-    checkSignature(header, `${encodedHeader}.${encodedPayload}`, signature, sessionKeys);
+    checkSignature(header, `${encodedHeader}.${encodedPayload}`, signature, keys);
 
     const payload = decodePart(encodedPayload);
-    if (header.alg === 'EdDSA') {
-      const { aud, iss } = payload;
-      const audiences = Array.isArray(aud) ? aud : [aud];
-      if (iss !== SESSION_JWT_ISSUER || !audiences.includes(SESSION_JWT_AUDIENCE)) throw new Error('foreign token');
-    }
+    const { aud, iss } = payload;
+    const audiences = Array.isArray(aud) ? aud : [aud];
+    if (iss !== SESSION_JWT_ISSUER || !audiences.includes(SESSION_JWT_AUDIENCE)) throw new Error('foreign token');
     const { exp, sub } = payload;
     if (typeof exp !== 'number' || !Number.isFinite(exp) || exp <= nowSeconds) throw new Error('expired');
     const userId = typeof sub === 'string' && /^\d+$/.test(sub) ? Number(sub) : sub;
@@ -163,8 +143,8 @@ const sessions = new WeakMap<Request, VerifiedSession>();
 
 /**
  * Middleware verifying the session token of every request: `router.use(requireSession)`.
- * Answers 401 without a Bearer token or with an invalid one, 503 when neither `JWT_PUBLIC_KEY` nor `JWT_SECRET` is
- * set or `JWT_PUBLIC_KEY` is malformed (read on every call, like the other settings); otherwise records the session
+ * Answers 401 without a Bearer token or with an invalid one, 503 when `JWT_PUBLIC_KEY` is not set or malformed
+ * (read on every call, like the other settings); otherwise records the session
  * for `sessionUserId`.
  */
 export const requireSession: RequestHandler = (req, _res, next) => {

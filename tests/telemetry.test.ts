@@ -1,7 +1,7 @@
-import { SpanKind, SpanStatusCode, type SpanContext } from '@opentelemetry/api';
+import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context as otelContext, propagation, trace, type SpanContext } from '@opentelemetry/api';
 import { ExportResultCode } from '@opentelemetry/core';
 import { emptyResource } from '@opentelemetry/resources';
-import { InMemorySpanExporter, type ReadableSpan } from '@opentelemetry/sdk-trace-node';
+import { InMemorySpanExporter, type ReadableSpan } from '@opentelemetry/sdk-trace';
 import {
   RedactingSpanExporter,
   TELEMETRY_ATTRIBUTES,
@@ -147,6 +147,24 @@ describe('startTelemetry', () => {
     expect(once).not.toHaveBeenCalled();
     expect(kill).not.toHaveBeenCalled();
     await expect(telemetry?.shutdown()).resolves.toBeUndefined();
+  });
+
+  it('OpenTelemetry 3 keeps the async context and the W3C propagation that NodeTracerProvider.register() set up', async () => {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://127.0.0.1:9';
+    captureLogs();
+    const telemetry = startTelemetry({ serviceName: 'bff-test', untracedPaths: [] });
+    const span = trace.getTracer('bff-test').startSpan('parent');
+    const carrier: Record<string, string> = {};
+    // The active span survives an await: without the AsyncLocalStorage manager, the upstream calls lose their parent.
+    await otelContext.with(trace.setSpan(ROOT_CONTEXT, span), async () => {
+      await Promise.resolve();
+      expect(trace.getActiveSpan()).toBe(span);
+      propagation.inject(otelContext.active(), carrier);
+    });
+    // The upstream APIs receive the trace: without the W3C propagator, no traceparent header is sent.
+    expect(carrier.traceparent).toBe(`00-${span.spanContext().traceId}-${span.spanContext().spanId}-01`);
+    span.end();
+    await telemetry?.shutdown();
   });
 });
 
