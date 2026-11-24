@@ -1,7 +1,7 @@
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, context as otelContext, propagation, trace, type SpanContext } from '@opentelemetry/api';
 import { ExportResultCode } from '@opentelemetry/core';
 import { emptyResource } from '@opentelemetry/resources';
-import { InMemorySpanExporter, type ReadableSpan } from '@opentelemetry/sdk-trace';
+import { InMemorySpanExporter, SamplingDecision, type ReadableSpan } from '@opentelemetry/sdk-trace';
 import {
   RedactingSpanExporter,
   TELEMETRY_ATTRIBUTES,
@@ -12,6 +12,7 @@ import {
   telemetryEnabled,
   urlTemplate,
 } from '../src';
+import { batchOptionsFromEnv, samplerFromEnv } from '../src/telemetry';
 import { captureLogs } from './support/capture-logs';
 
 const ENV = { ...process.env };
@@ -186,5 +187,68 @@ describe('diagLogger', () => {
       ['DEBUG', 'debug', 'opentelemetry'],
       ['DEBUG', 'verbose', 'opentelemetry'],
     ]);
+  });
+});
+
+describe('OpenTelemetry 3 sampling and batch variables', () => {
+  const SAMPLER_VARIABLES = [
+    'OTEL_TRACES_SAMPLER',
+    'OTEL_TRACES_SAMPLER_ARG',
+    'OTEL_BSP_MAX_QUEUE_SIZE',
+    'OTEL_BSP_MAX_EXPORT_BATCH_SIZE',
+    'OTEL_BSP_SCHEDULE_DELAY',
+    'OTEL_BSP_EXPORT_TIMEOUT',
+  ];
+  afterEach(() => {
+    for (const name of SAMPLER_VARIABLES) delete process.env[name];
+  });
+  const decision = (traceId = '0af7651916cd43dd8448eb211c80319c') =>
+    samplerFromEnv().shouldSample(ROOT_CONTEXT, traceId, 'span', SpanKind.SERVER, {}, []).decision;
+
+  it('keeps the SDK default (parent based, always on) without OTEL_TRACES_SAMPLER', () => {
+    expect(samplerFromEnv().toString()).toMatch(/ParentBased.*AlwaysOn/);
+    expect(decision()).toBe(SamplingDecision.RECORD_AND_SAMPLED);
+  });
+
+  it.each([
+    ['always_off', undefined, SamplingDecision.NOT_RECORD],
+    ['parentbased_always_off', undefined, SamplingDecision.NOT_RECORD],
+    ['always_on', undefined, SamplingDecision.RECORD_AND_SAMPLED],
+    ['traceidratio', '0', SamplingDecision.NOT_RECORD],
+    ['parentbased_traceidratio', '0', SamplingDecision.NOT_RECORD],
+    ['traceidratio', 'not a number', SamplingDecision.RECORD_AND_SAMPLED],
+  ])('honours OTEL_TRACES_SAMPLER=%s (arg %s) as the 2.x SDK did', (sampler, arg, expected) => {
+    process.env.OTEL_TRACES_SAMPLER = sampler;
+    if (arg !== undefined) process.env.OTEL_TRACES_SAMPLER_ARG = arg;
+    expect(decision()).toBe(expected);
+  });
+
+  it('passes the OTEL_BSP_* settings to the batch processor and keeps the defaults otherwise', () => {
+    const exporter = new InMemorySpanExporter();
+    expect(batchOptionsFromEnv(exporter)).toEqual({ exporter });
+    process.env.OTEL_BSP_MAX_QUEUE_SIZE = '8192';
+    process.env.OTEL_BSP_MAX_EXPORT_BATCH_SIZE = '1024';
+    process.env.OTEL_BSP_SCHEDULE_DELAY = '1000';
+    process.env.OTEL_BSP_EXPORT_TIMEOUT = '10000';
+    expect(batchOptionsFromEnv(exporter)).toEqual({
+      exporter,
+      maxQueueSize: 8192,
+      maxExportBatchSize: 1024,
+      scheduledDelayMillis: 1000,
+      exportTimeoutMillis: 10000,
+    });
+  });
+
+  it('does not record spans when startTelemetry runs with OTEL_TRACES_SAMPLER=always_off', async () => {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = 'http://127.0.0.1:9';
+    process.env.OTEL_TRACES_SAMPLER = 'always_off';
+    captureLogs();
+    // The API keeps the first global provider: drop the one an earlier test registered.
+    trace.disable();
+    const telemetry = startTelemetry({ serviceName: 'bff-test', untracedPaths: [] });
+    const span = trace.getTracer('bff-test').startSpan('dropped');
+    expect(span.isRecording()).toBe(false);
+    span.end();
+    await telemetry?.shutdown();
   });
 });

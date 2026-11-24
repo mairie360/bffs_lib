@@ -52,7 +52,8 @@ npm test           # jest, coverage thresholds 90%
   zod string, so the BFF names the bad field; an API's 400 body is never relayed)
 - `src/check-apis.ts`: `checkApis`, `checkApisResponseSchema` (MAIR-430)
 - `src/security.ts`: `securityHeaders`, `apiOnlyHeaders`, `createRateLimiter`, `sessionKey` (MAIR-430)
-- `src/telemetry.ts`: `startTelemetry` (MAIR-504): HTTP + Express instrumentations, OTLP export of traces and metrics, off
+- `src/telemetry.ts`: `startTelemetry` (MAIR-504): HTTP + Express instrumentations, OTLP export of traces and metrics
+  (OpenTelemetry 3: `samplerFromEnv` / `batchOptionsFromEnv` read `OTEL_TRACES_SAMPLER*` / `OTEL_BSP_*`, which the SDK no longer does), off
   without `OTEL_EXPORTER_OTLP_ENDPOINT`; `RedactingSpanExporter` / `redactSpan` keep only `TELEMETRY_ATTRIBUTES`
 - `src/shutdown.ts`: `gracefulShutdown(server)`: on SIGTERM / SIGINT stops accepting, closes idle keep-alive
   connections, lets running requests finish, ends SSE streams at once, flushes `activeTelemetry()`, exits 0; forced
