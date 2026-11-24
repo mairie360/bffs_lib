@@ -41,11 +41,12 @@ holds nothing but the public key:
 | Variable | Content |
 | --- | --- |
 | `JWT_PUBLIC_KEY` | Core's Ed25519 public key in PEM (`openssl pkey -pubout`); several `PUBLIC KEY` blocks during a key rotation; `\n`-escaped line breaks accepted |
-| `JWT_SECRET` | Transition only: while it is set, the historical HS256 tokens are still accepted. Remove it once Core signs with its key: those tokens are then refused (401) |
 
-Without either variable (or with a malformed `JWT_PUBLIC_KEY`), `requireSession` answers 503. `sessionKeysFromEnv()`
-returns the parsed keys (it throws on a malformed key): call it at startup to fail fast instead of checking
-`JWT_SECRET`.
+Any other algorithm is refused with a 401, HS256 included: `JWT_SECRET` is never read (remove it from the BFF's
+environment). Without `JWT_PUBLIC_KEY` (or with a malformed one), `requireSession` answers 503.
+`sessionKeysFromEnv()` returns the parsed keys, `undefined` when `JWT_PUBLIC_KEY` is missing or blank, and throws on
+a malformed key: call it at startup and refuse to start when it throws or returns `undefined`, so a BFF left with
+`JWT_SECRET` alone stops at boot instead of answering 503.
 
 ### Caller's role (MAIR-529)
 

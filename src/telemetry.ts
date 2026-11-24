@@ -1,6 +1,14 @@
 import type { IncomingMessage } from 'node:http';
-import { DiagLogLevel, diag, type Attributes, type DiagLogger, type Link } from '@opentelemetry/api';
-import type { ExportResult } from '@opentelemetry/core';
+import { DiagLogLevel, context, diag, propagation, trace, type Attributes, type DiagLogger, type Link } from '@opentelemetry/api';
+import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
+import {
+  CompositePropagator,
+  W3CBaggagePropagator,
+  W3CTraceContextPropagator,
+  getNumberFromEnv,
+  getStringFromEnv,
+  type ExportResult,
+} from '@opentelemetry/core';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 import { registerInstrumentations } from '@opentelemetry/instrumentation';
@@ -8,7 +16,18 @@ import { ExpressInstrumentation, ExpressLayerType } from '@opentelemetry/instrum
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { defaultResource, detectResources, envDetector, resourceFromAttributes } from '@opentelemetry/resources';
 import { MeterProvider, PeriodicExportingMetricReader, createAllowListAttributesProcessor } from '@opentelemetry/sdk-metrics';
-import { BatchSpanProcessor, NodeTracerProvider, type ReadableSpan, type SpanExporter } from '@opentelemetry/sdk-trace-node';
+import {
+  AlwaysOffSampler,
+  AlwaysOnSampler,
+  BatchSpanProcessor,
+  ParentBasedSampler,
+  TraceIdRatioBasedSampler,
+  TracerProvider,
+  type BatchSpanProcessorOptions,
+  type ReadableSpan,
+  type Sampler,
+  type SpanExporter,
+} from '@opentelemetry/sdk-trace';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 import { maskValues } from './describe-error';
 import { logger } from './logger';
@@ -174,6 +193,50 @@ export const diagLogger: DiagLogger = {
   verbose: (message) => logger.debug(maskValues(message), { source: 'opentelemetry' }),
 };
 
+/**
+ * The sampler of the standard `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` variables, which the OpenTelemetry 3
+ * `TracerProvider` no longer reads (the 2.x `NodeTracerProvider` did). Unset or unknown: `parentbased_always_on`,
+ * the SDK default.
+ */
+export function samplerFromEnv(): Sampler {
+  const ratio = (): number => {
+    const value = getNumberFromEnv('OTEL_TRACES_SAMPLER_ARG');
+    return value === undefined || value < 0 || value > 1 ? 1 : value;
+  };
+  switch (getStringFromEnv('OTEL_TRACES_SAMPLER')) {
+    case 'always_on':
+      return new AlwaysOnSampler();
+    case 'always_off':
+      return new AlwaysOffSampler();
+    case 'traceidratio':
+      return new TraceIdRatioBasedSampler(ratio());
+    case 'parentbased_always_off':
+      return new ParentBasedSampler({ root: new AlwaysOffSampler() });
+    case 'parentbased_traceidratio':
+      return new ParentBasedSampler({ root: new TraceIdRatioBasedSampler(ratio()) });
+    default:
+      return new ParentBasedSampler({ root: new AlwaysOnSampler() });
+  }
+}
+
+/** The batch options of the standard `OTEL_BSP_*` variables, also no longer read by OpenTelemetry 3; unset ones keep the SDK defaults. */
+export function batchOptionsFromEnv(exporter: SpanExporter): BatchSpanProcessorOptions {
+  const options: BatchSpanProcessorOptions = { exporter };
+  const read = (name: string): number | undefined => {
+    const value = getNumberFromEnv(name);
+    return value !== undefined && value > 0 ? value : undefined;
+  };
+  const maxQueueSize = read('OTEL_BSP_MAX_QUEUE_SIZE');
+  const maxExportBatchSize = read('OTEL_BSP_MAX_EXPORT_BATCH_SIZE');
+  const scheduledDelayMillis = read('OTEL_BSP_SCHEDULE_DELAY');
+  const exportTimeoutMillis = read('OTEL_BSP_EXPORT_TIMEOUT');
+  if (maxQueueSize !== undefined) options.maxQueueSize = maxQueueSize;
+  if (maxExportBatchSize !== undefined) options.maxExportBatchSize = maxExportBatchSize;
+  if (scheduledDelayMillis !== undefined) options.scheduledDelayMillis = scheduledDelayMillis;
+  if (exportTimeoutMillis !== undefined) options.exportTimeoutMillis = exportTimeoutMillis;
+  return options;
+}
+
 let current: Telemetry | undefined;
 
 /** The telemetry `startTelemetry` started in this process, flushed by `gracefulShutdown`. */
@@ -194,11 +257,17 @@ export function startTelemetry(options: TelemetryOptions): Telemetry | undefined
     )
     .merge(detectResources({ detectors: [envDetector] }));
 
-  const tracerProvider = new NodeTracerProvider({
+  const tracerProvider = new TracerProvider({
     resource,
-    spanProcessors: [new BatchSpanProcessor(new RedactingSpanExporter(new OTLPTraceExporter()))],
+    sampler: samplerFromEnv(),
+    spanProcessors: [new BatchSpanProcessor(batchOptionsFromEnv(new RedactingSpanExporter(new OTLPTraceExporter())))],
   });
-  tracerProvider.register();
+  // What NodeTracerProvider.register() did before OpenTelemetry 3: async context, W3C propagation, global provider.
+  context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
+  propagation.setGlobalPropagator(
+    new CompositePropagator({ propagators: [new W3CTraceContextPropagator(), new W3CBaggagePropagator()] }),
+  );
+  trace.setGlobalTracerProvider(tracerProvider);
 
   const meterProvider = new MeterProvider({
     resource,

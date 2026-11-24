@@ -1,0 +1,23 @@
+# Coverage target of the project and of each patch: 60 %, the same as the 60 % gate of the repository tests.
+# Without this file Codecov applies its default target `auto`, which forbids any PR from dropping
+# below the coverage of `main`, so a patch that meets the repository gate can still fail.
+coverage:
+  status:
+    project:
+      default:
+        target: 60%
+        # No extra tolerance: 60 % is already the floor.
+        threshold: 0%
+        if_ci_failed: error
+    patch:
+      default:
+        target: 60%
+        threshold: 0%
+
+ignore:
+  - "tests/**"
+  - "scripts/**"
+
+comment:
+  layout: "condensed_header, diff, files"
+  require_changes: true

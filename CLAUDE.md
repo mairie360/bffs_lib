@@ -41,19 +41,19 @@ npm test           # jest, coverage thresholds 90%
   wall clock of a time zone (Paris by default) <-> UTC instants of the APIs, DST included
 - `src/auth.ts`: Bearer extraction (`authorization`, `requireBearer`), unverified `sub`, `noStore`, `parseTrustProxy` (MAIR-429)
 - `src/session.ts`: session tokens verified by the BFF (MAIR-474): `verifySessionToken` (EdDSA with Core's public key of
-  `JWT_PUBLIC_KEY` picked by `kid`, `iss` `mairie360-core` and `aud` `mairie360` checked (MAIR-680); HS256 with
-  `JWT_SECRET` only while that variable is set (transition); `exp` without leeway, positive integer `sub`),
+  `JWT_PUBLIC_KEY` picked by `kid`, `iss` `mairie360-core` and `aud` `mairie360` checked (MAIR-680); any other algorithm, HS256 included,
+  is refused and `JWT_SECRET` is never read; `exp` without leeway, positive integer `sub`),
   `sessionKeysFromEnv` / `parseSessionPublicKeys` (keys by RFC 7638 thumbprint, same `kid` as `mairie360_api_lib`),
-  `requireSession` (401 before any upstream call, 503 without `JWT_PUBLIC_KEY` nor `JWT_SECRET` or with a malformed
-  `JWT_PUBLIC_KEY`; a blank `JWT_SECRET` counts as unset),
+  `requireSession` (401 before any upstream call, 503 without `JWT_PUBLIC_KEY` or with a malformed one),
   `sessionUserId` / `verifiedSession`, `sessionRole` (the `role` claim Core signs, MAIR-529; `undefined` when missing or empty). Use them for any access decision; `requireBearer` and `unverifiedSubject` only
-  check the shape and stay for the transition. Revocation and archived accounts are still checked upstream.
+  check the shape. Revocation and archived accounts are still checked upstream.
 - `src/config.ts`: `baseUrl`, `assertConfigured` (MAIR-431)
 - `src/validation.ts`: `validationError`, `parseRequest` (MAIR-430), `textField` (MAIR-560: the APIs' text rules as a
   zod string, so the BFF names the bad field; an API's 400 body is never relayed)
 - `src/check-apis.ts`: `checkApis`, `checkApisResponseSchema` (MAIR-430)
 - `src/security.ts`: `securityHeaders`, `apiOnlyHeaders`, `createRateLimiter`, `sessionKey` (MAIR-430)
-- `src/telemetry.ts`: `startTelemetry` (MAIR-504): HTTP + Express instrumentations, OTLP export of traces and metrics, off
+- `src/telemetry.ts`: `startTelemetry` (MAIR-504): HTTP + Express instrumentations, OTLP export of traces and metrics
+  (OpenTelemetry 3: `samplerFromEnv` / `batchOptionsFromEnv` read `OTEL_TRACES_SAMPLER*` / `OTEL_BSP_*`, which the SDK no longer does), off
   without `OTEL_EXPORTER_OTLP_ENDPOINT`; `RedactingSpanExporter` / `redactSpan` keep only `TELEMETRY_ATTRIBUTES`
 - `src/shutdown.ts`: `gracefulShutdown(server)`: on SIGTERM / SIGINT stops accepting, closes idle keep-alive
   connections, lets running requests finish, ends SSE streams at once, flushes `activeTelemetry()`, exits 0; forced
