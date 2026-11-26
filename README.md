@@ -157,7 +157,7 @@ const users = await directory.getOrLoad(callerKey(sessionUserId(req), 'directory
 directory.clear(); // after a write
 ```
 
-## Global search (MAIR-1229)
+## Global search
 
 The header's search box of every front calls its own BFF's `GET /search?q=&limit=`. The BFF serves it with
 `globalSearchHandler`, which queries the five business APIs' `GET /api/v1/search` in parallel with the caller's Bearer

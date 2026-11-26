@@ -63,7 +63,7 @@ npm test           # jest, coverage thresholds 90%
   `errorHandler`, `checkApis` and the OpenTelemetry diagnostics (`diagLogger`) write through it
   - MAIR-555: `LOG_FORMAT` `json`/`text`; unset = coloured text on a terminal outside `NODE_ENV=test`, JSON otherwise
     (`FORCE_COLOR` > `NO_COLOR` > TTY for colours). Containers must keep JSON: never make text the default off a TTY.
-- `src/global-search.ts`: `globalSearch`, `globalSearchHandler` and their schemas (MAIR-1229): the header's global search.
+- `src/global-search.ts`: `globalSearch`, `globalSearchHandler` and their schemas: the header's global search.
   Every BFF serves `GET /search` itself by querying the five business APIs' `GET /api/v1/search` in parallel (`fetch`, the
   caller's Bearer token, `SEARCH_TIMEOUT_MS` per API) and merging them by module (`SEARCH_MODULES`, `<SERVICE>_URL` of
   `SEARCH_SERVICES`); an API that fails, times out, answers out of contract or is not configured is listed in
