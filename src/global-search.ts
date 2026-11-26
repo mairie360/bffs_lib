@@ -111,7 +111,16 @@ async function searchModule(
   });
   if (response.status === 401) throw new SessionRefused();
   if (!response.ok) throw new HttpError(502, undefined, { cause: new Error(`${SEARCH_SERVICES[module]} answered ${response.status}`) });
-  return ApiSearchResponseSchema.parse(await response.json()).items;
+  // Fixed messages only: a parser or schema error would quote the upstream body, which may hold personal data.
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(`${SEARCH_SERVICES[module]} answered a body that is not JSON`);
+  }
+  const parsed = ApiSearchResponseSchema.safeParse(payload);
+  if (!parsed.success) throw new Error(`${SEARCH_SERVICES[module]} answered out of contract`);
+  return parsed.data.items;
 }
 
 /**
@@ -154,9 +163,10 @@ export async function globalSearch(
  */
 export function globalSearchHandler(options: GlobalSearchOptions = {}): RequestHandler {
   return async (req, res) => {
+    // First, so the errors (400, 401) are never cached either.
+    res.setHeader('Cache-Control', 'no-store');
     const query = parseRequest(GlobalSearchQuerySchema, req.query, 'query');
     const answer = await globalSearch(req, query, options);
-    res.setHeader('Cache-Control', 'no-store');
     res.status(200).json(answer);
   };
 }

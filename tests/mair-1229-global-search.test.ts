@@ -22,7 +22,7 @@ function item(kind: SearchItem['kind'], id: number, title = `${kind} ${id}`): Se
   return { kind, id, title, excerpt: null, parent_id: null, updated_at: '2026-11-26T10:00:00Z' };
 }
 
-type Reply = SearchItem[] | number | 'hang' | 'garbage';
+type Reply = SearchItem[] | number | 'hang' | 'garbage' | 'not-json';
 
 /** A `fetch` answering each API from `replies` (by host), recording every call. */
 function fakeFetch(replies: Partial<Record<SearchModule, Reply>>) {
@@ -37,6 +37,7 @@ function fakeFetch(replies: Partial<Record<SearchModule, Reply>>) {
         init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
       });
     }
+    if (reply === 'not-json') return new Response('<p>Anne "Dupont" anne.dupont@mairie.fr</p>', { status: 200 });
     if (reply === 'garbage') return new Response(JSON.stringify({ results: 'nope' }), { status: 200 });
     if (typeof reply === 'number') return new Response('{}', { status: reply });
     return new Response(JSON.stringify({ items: reply }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -114,6 +115,16 @@ describe('MAIR-1229 global search of the BFFs', () => {
     expect(JSON.stringify(logs)).not.toMatch(/secret-term|header\.payload/);
   });
 
+  test('a body that is not JSON or out of contract is never quoted in the logs', async () => {
+    const logs = captureLogs();
+    const { fetch } = fakeFetch({ agents: 'not-json', projects: [{ ...item('task', 1), kind: 'secret-kind' } as unknown as SearchItem] });
+
+    const res = await asCaller(request(app({ fetch })).get('/search?q=ab'));
+
+    expect(res.body.unavailable).toEqual(['agents', 'projects']);
+    expect(JSON.stringify(logs)).not.toMatch(/anne|Dupont|secret-kind/i);
+  });
+
   test('a session an API refuses is a 401', async () => {
     const { fetch } = fakeFetch({ projects: 401, messages: [item('message', 1)] });
 
@@ -147,6 +158,7 @@ describe('MAIR-1229 global search of the BFFs', () => {
     const res = await asCaller(request(app({ fetch })).get(`/search${query}`));
 
     expect(res.status).toBe(400);
+    expect(res.headers['cache-control']).toBe('no-store');
     expect(ErrorResponseSchema.parse(res.body).error.details.map((detail) => detail.path)).toContain(path);
     expect(fetch).not.toHaveBeenCalled();
   });
