@@ -63,6 +63,11 @@ npm test           # jest, coverage thresholds 90%
   `errorHandler`, `checkApis` and the OpenTelemetry diagnostics (`diagLogger`) write through it
   - MAIR-555: `LOG_FORMAT` `json`/`text`; unset = coloured text on a terminal outside `NODE_ENV=test`, JSON otherwise
     (`FORCE_COLOR` > `NO_COLOR` > TTY for colours). Containers must keep JSON: never make text the default off a TTY.
+- `src/global-search.ts`: `globalSearch`, `globalSearchHandler` and their schemas: the header's global search.
+  Every BFF serves `GET /search` itself by querying the five business APIs' `GET /api/v1/search` in parallel (`fetch`, the
+  caller's Bearer token, `SEARCH_TIMEOUT_MS` per API) and merging them by module (`SEARCH_MODULES`, `<SERVICE>_URL` of
+  `SEARCH_SERVICES`); an API that fails, times out, answers out of contract or is not configured is listed in
+  `unavailable`, an API's 401 is a 401. `q`/`limit` follow the APIs' rules. The term is never logged
 - `src/concurrency.ts`: `mapWithConcurrency`, `readOffsetPages` (MAIR-525): bounded parallel calls, pages read in parallel
 - `src/roles.ts`: `roleKey`, `hasRole` and the one role rule of every BFF: `canonicalRole` / `canonicalRoles` ("Administrateur", `ROLE_ADMIN`, " admin " are `Admin`; a custom role is `null`), `isAdminRole`, `isManagerRole` (Admin, Maire, Responsable), `CORE_ROLES`, `PROJECT_TASK_MANAGER_ROLES`. A BFF never compares a role name by hand (`=== 'admin'`, its own alias table): add the alias here
 - `src/cache.ts`: `MemoryCache` (TTL, shared in-flight loads, invalidation that drops overtaken loads), `callerKey` (MAIR-525)

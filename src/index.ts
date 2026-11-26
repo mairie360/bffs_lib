@@ -111,3 +111,25 @@ export {
   type UsageLedgerOptions,
 } from './usage';
 export { gracefulShutdown, SHUTDOWN_TIMEOUT_MS, type GracefulShutdown, type GracefulShutdownOptions } from './shutdown';
+export {
+  SEARCH_MODULES,
+  SEARCH_SERVICES,
+  SEARCH_API_PATH,
+  SEARCH_TIMEOUT_MS,
+  SEARCH_MIN_LENGTH,
+  SEARCH_MAX_LENGTH,
+  SEARCH_DEFAULT_LIMIT,
+  SEARCH_MAX_LIMIT,
+  GlobalSearchQuerySchema,
+  GlobalSearchResponseSchema,
+  SearchItemSchema,
+  SearchKindSchema,
+  SearchModuleSchema,
+  globalSearch,
+  globalSearchHandler,
+  type GlobalSearchOptions,
+  type GlobalSearchQuery,
+  type GlobalSearchResponse,
+  type SearchItem,
+  type SearchModule,
+} from './global-search';

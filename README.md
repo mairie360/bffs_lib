@@ -157,6 +157,28 @@ const users = await directory.getOrLoad(callerKey(sessionUserId(req), 'directory
 directory.clear(); // after a write
 ```
 
+## Global search
+
+The header's search box of every front calls its own BFF's `GET /search?q=&limit=`. The BFF serves it with
+`globalSearchHandler`, which queries the five business APIs' `GET /api/v1/search` in parallel with the caller's Bearer
+token (each API applies its own access rules) and merges their answers by module:
+
+```ts
+import { GlobalSearchQuerySchema, GlobalSearchResponseSchema, globalSearchHandler, requireSession } from '@mairie360/bffs-lib';
+
+router.get('/search', requireSession, globalSearchHandler());
+// OpenAPI: request query GlobalSearchQuerySchema, 200 GlobalSearchResponseSchema
+```
+
+- Answer: `{ groups: [{ module, items: [{ kind, id, title, excerpt, parent_id, updated_at }] }], unavailable: [module] }`,
+  one group per module with results, in `SEARCH_MODULES` order (`agents`, `projects`, `calendar`, `messages`,
+  `elearning`). The front builds each link from `module`, `kind` and `id`.
+- Each API gets `SEARCH_TIMEOUT_MS` (1.5 s). One that fails, times out, answers out of contract or has no
+  `<SERVICE>_URL` (`CORE_API`, `PROJECT_API`, `CALENDAR_API`, `MESSAGE_API`, `ELEARNING_API`) is listed in
+  `unavailable` and logged without the term; an API's 401 is a 401.
+- `q`: 2 to 100 characters once trimmed, no control character; `limit`: 1 to 20, 8 by default. A bad value is a 400
+  naming `query.q` or `query.limit`, before any upstream call.
+
 ## Telemetry (MAIR-504)
 
 OpenTelemetry traces and metrics, exported over OTLP (http/protobuf) to the collector of the instance. Off
